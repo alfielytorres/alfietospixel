@@ -1351,17 +1351,13 @@
   }
 
   // ---- landing wordmark art: the brand word rendered as a field of
-  // purple stars, sampled from real text like the versions site hero ----
+  // purple stars — real SVG vector paths (no font/emoji glyphs, so it
+  // renders identically on every platform), sampled from Inter text ----
   function drawWordmarkArt() {
     const el = $("wordmark-art");
     if (!el) return;
-    const cssW = Math.min(el.parentElement.clientWidth * 0.92 || 640, 640);
-    if (cssW < 100) return;
-    const scale = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.round(cssW * scale);
-    const h = Math.round(w * 0.24);
+    const w = 1000, h = Math.round(w * 0.24);
 
-    // sample mask: the word drawn as bold text
     const off = document.createElement("canvas");
     off.width = w; off.height = h;
     const g = off.getContext("2d");
@@ -1371,35 +1367,49 @@
     g.fillText("versions", w / 2, h * 0.56);
     const mask = g.getImageData(0, 0, w, h).data;
 
-    el.width = w; el.height = h;
-    el.style.height = `${Math.round(cssW * 0.24)}px`;
-    const c = el.getContext("2d");
     const rng = Effects.makeRng(20260717);
-    const glyphs = ["✳", "✱", "＊", "*", "+", "~"];
     const purples = ["#8a5bc9", "#7451d2", "#5b52c9", "#9a5fc2", "#4c4fc0", "#6d4fd8"];
-    const step = Math.max(3, Math.round(w / 130));
-    c.textAlign = "center";
-    c.textBaseline = "middle";
+    const step = Math.max(4, Math.round(w / 120));
+    const parts = [];
+
+    const rayStar = (x, y, r, rays, rot, color) => {
+      let d = "";
+      for (let k = 0; k < rays; k++) {
+        const ang = (Math.PI * 2 * k) / rays;
+        d += `M0 0L${(Math.cos(ang) * r).toFixed(1)} ${(Math.sin(ang) * r).toFixed(1)}`;
+      }
+      parts.push(`<path d="${d}" stroke="${color}" stroke-width="${(r * 0.36).toFixed(1)}" ` +
+        `stroke-linecap="round" fill="none" transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${rot})"/>`);
+    };
+    const sparkle = (x, y, r, rot, color) => {
+      const rr = r.toFixed(1);
+      parts.push(`<path d="M0 -${rr}Q0 0 ${rr} 0Q0 0 0 ${rr}Q0 0 -${rr} 0Q0 0 0 -${rr}Z" ` +
+        `fill="${color}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${rot}) scale(1.35)"/>`);
+    };
+
     for (let y = step / 2; y < h; y += step) {
       for (let x = step / 2; x < w; x += step) {
         const i = ((Math.round(y) * w) + Math.round(x)) * 4;
         if (mask[i + 3] < 80 || rng() < 0.06) continue;
-        c.fillStyle = purples[Math.floor(rng() * purples.length)];
-        c.font = `${step * (1.1 + rng() * 1.2)}px serif`;
-        c.fillText(glyphs[Math.floor(rng() * glyphs.length)],
-          x + (rng() - 0.5) * step * 0.7, y + (rng() - 0.5) * step * 0.7);
+        const color = purples[Math.floor(rng() * purples.length)];
+        const r = step * (0.55 + rng() * 0.75);
+        const px = x + (rng() - 0.5) * step * 0.7;
+        const py = y + (rng() - 0.5) * step * 0.7;
+        const rot = Math.round(rng() * 90);
+        const kind = rng();
+        if (kind < 0.22) sparkle(px, py, r, rot, color);
+        else if (kind < 0.5) rayStar(px, py, r, 6, rot, color);
+        else if (kind < 0.72) rayStar(px, py, r, 5, rot, color);
+        else if (kind < 0.88) rayStar(px, py, r * 1.1, 8, rot, color);
+        else rayStar(px, py, r, 4, rot, color); // plus
       }
     }
+    el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">${parts.join("")}</svg>`;
   }
   drawWordmarkArt();
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(drawWordmarkArt); // redraw once Inter is in
   }
-  let artResizeT = 0;
-  window.addEventListener("resize", () => {
-    clearTimeout(artResizeT);
-    artResizeT = setTimeout(drawWordmarkArt, 200);
-  });
 
   // header CTA + explicit chooser both open the file picker
   $("header-cta").addEventListener("click", () => $("file-input").click());

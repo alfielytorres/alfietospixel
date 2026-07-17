@@ -104,6 +104,7 @@ main { flex: 1; width: 100%; }
   width: min(92%, 640px);
   margin: 0 auto 2.2rem;
 }
+.wordmark-art svg { display: block; width: 100%; height: auto; }
 .drop-title {
   font-family: Georgia, "Times New Roman", serif;
   font-weight: 400;
