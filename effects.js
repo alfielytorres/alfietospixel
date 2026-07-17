@@ -73,9 +73,27 @@ const Effects = (() => {
     return palette[best];
   }
 
+  function hexToRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function resolvePalette(params) {
+    if (params.palette === "custom") {
+      const cols = (params.customColors || [])
+        .map(hexToRgb)
+        .filter(Boolean)
+        .slice(0, 3);
+      if (cols.length >= 2) return cols;
+    }
+    return PALETTES[params.palette] || PALETTES["1-bit"];
+  }
+
   function dither(img, params) {
     const scale = Math.max(1, Math.round(params.pixelSize));
-    const palette = PALETTES[params.palette] || PALETTES["1-bit"];
+    const palette = resolvePalette(params);
     const w = Math.max(1, Math.floor(img.width / scale));
     const h = Math.max(1, Math.floor(img.height / scale));
 
@@ -564,7 +582,8 @@ const Effects = (() => {
       id: "dither",
       name: "DITHER",
       fn: dither,
-      defaults: { algorithm: "bayer4", palette: "1-bit", pixelSize: 3, amount: 1, contrast: 1, brightness: 0 },
+      defaults: { algorithm: "bayer4", palette: "1-bit", pixelSize: 3, amount: 1, contrast: 1, brightness: 0,
+        customColors: ["#0a0a0f", "#ff2e88", "#00ffc3"] },
       params: [
         { key: "algorithm", label: "algorithm", type: "select",
           options: [
@@ -576,7 +595,8 @@ const Effects = (() => {
             ["none", "hard threshold"],
           ] },
         { key: "palette", label: "palette", type: "select",
-          options: Object.keys(PALETTES).map((k) => [k, k]) },
+          options: [...Object.keys(PALETTES).map((k) => [k, k]), ["custom", "custom (your colors)"]] },
+        { key: "customColors", label: "custom colors (2–3)", type: "colors", count: 3 },
         { key: "pixelSize", label: "pixel size", min: 1, max: 16, step: 1, unit: "px" },
         { key: "amount", label: "dither strength", min: 0, max: 1.5, step: 0.05 },
         { key: "contrast", label: "contrast", min: 0.4, max: 2.5, step: 0.05 },

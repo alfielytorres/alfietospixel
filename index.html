@@ -3,57 +3,82 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ALFIETO'S PIXEL — glitch art generator</title>
+<title>VERSIONS EYE — glitch studio</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1 class="logo" data-text="ALFIETO'S PIXEL">ALFIETO'S PIXEL</h1>
-  <p class="tagline">drop an image or video · wreck it · download it</p>
+<header class="site-header">
+  <div class="wordmark">VERSIONS<span class="eye">◉</span>EYE</div>
+  <nav class="site-nav">
+    <span class="nav-item">GLITCH STUDIO</span>
+    <span class="nav-item muted">EST. 2026</span>
+  </nav>
 </header>
+
+<section class="hero">
+  <h1>Images and video,<br>re-versioned.</h1>
+  <p class="hero-sub">Drop a file. Build an effect chain. Export as PNG, SVG or MOV.<br>Everything runs in your browser — nothing is uploaded.</p>
+</section>
 
 <main>
   <section id="dropzone" class="dropzone">
     <input type="file" id="file-input" accept="image/*,video/*" hidden>
     <div class="dropzone-inner">
-      <div class="dropzone-icon">▚▞</div>
-      <p><strong>Drop an image or video here</strong> or click to browse</p>
-      <p class="hint">videos: first 10 seconds are used · paste images from clipboard</p>
-      <button id="demo-btn" class="btn btn-ghost" type="button">no image? use demo pattern</button>
+      <div class="index-label">01 — SOURCE</div>
+      <p class="drop-title">DROP AN IMAGE OR VIDEO</p>
+      <p class="hint">or click to browse · paste from clipboard · videos use their first 10 seconds</p>
+      <button id="demo-btn" class="btn" type="button">USE DEMO PATTERN</button>
     </div>
   </section>
 
   <section id="workspace" class="workspace" hidden>
     <div class="canvas-panel">
+      <div class="index-label">02 — CANVAS</div>
       <div class="canvas-wrap">
         <canvas id="canvas"></canvas>
       </div>
       <div class="canvas-actions">
-        <button id="new-image-btn" class="btn btn-ghost" type="button">↩ new file</button>
-        <button id="original-btn" class="btn btn-ghost" type="button">👁 hold for original</button>
-        <button id="playpause-btn" class="btn" type="button" hidden>⏸ pause</button>
-        <button id="reroll-btn" class="btn" type="button">⟳ reroll seed</button>
-        <button id="random-btn" class="btn" type="button">🎲 randomize all</button>
-        <button id="download-btn" class="btn btn-primary" type="button">↓ download PNG</button>
-        <button id="export-video-btn" class="btn btn-primary" type="button" hidden>⏺ export WebM</button>
+        <button id="new-image-btn" class="btn" type="button">NEW FILE</button>
+        <button id="original-btn" class="btn" type="button">HOLD FOR ORIGINAL</button>
+        <button id="playpause-btn" class="btn" type="button" hidden>PAUSE</button>
+        <button id="reroll-btn" class="btn" type="button">REROLL SEED</button>
+        <button id="random-btn" class="btn" type="button">RANDOMIZE ALL</button>
+      </div>
+      <div class="export-bar">
+        <div class="index-label">03 — EXPORT</div>
+        <div class="export-actions">
+          <button id="download-btn" class="btn btn-primary" type="button">PNG ↓</button>
+          <button id="svg-btn" class="btn btn-primary" type="button">SVG ↓</button>
+          <span id="res-wrap" class="res-wrap" hidden>
+            <label for="export-res" class="res-label">RES</label>
+            <select id="export-res">
+              <option value="1080">1080p</option>
+              <option value="2160">4K</option>
+              <option value="preview">preview (fast)</option>
+            </select>
+          </span>
+          <button id="export-video-btn" class="btn btn-primary" type="button" hidden>MOV ↓</button>
+        </div>
       </div>
     </div>
 
     <aside class="controls" id="controls">
       <div class="controls-header">
-        <h2>EFFECT CHAIN</h2>
-        <button id="reset-btn" class="btn btn-ghost btn-small" type="button">reset all</button>
+        <div class="index-label">02.1 — EFFECT CHAIN</div>
+        <button id="reset-btn" class="btn btn-small" type="button">RESET</button>
       </div>
-      <p class="hint">toggle effects on/off — they stack top to bottom</p>
+      <p class="hint">Toggle effects on or off — they stack top to bottom.</p>
       <div id="effect-list"></div>
     </aside>
   </section>
 </main>
 
-<footer>
-  <p>everything runs in your browser — images never leave your machine</p>
+<footer class="site-footer">
+  <span>VERSIONS EYE — a client-side glitch studio</span>
+  <span class="muted">files never leave your machine</span>
 </footer>
 
+<script src="vendor/mp4-muxer.js"></script>
 <script src="effects.js"></script>
 <script src="app.js"></script>
 </body>

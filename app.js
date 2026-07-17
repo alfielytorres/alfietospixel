@@ -1,12 +1,13 @@
-/* ALFIETO'S PIXEL — UI wiring: load image/video, build controls,
- * run the effect pipeline (live for video), export PNG or WebM. */
+/* VERSIONS EYE — UI wiring: load image/video, build controls,
+ * run the effect pipeline (live for video), export PNG / SVG / MOV. */
 "use strict";
 
 (() => {
   const MAX_DIM = 1600;        // cap for still images
-  const MAX_VIDEO_DIM = 960;   // lower cap so per-frame effects stay realtime
+  const MAX_VIDEO_DIM = 960;   // preview cap so per-frame effects stay realtime
   const MAX_CLIP_SECONDS = 10; // videos are trimmed to their first 10s
   const EXPORT_FPS = 30;
+  const SVG_MAX_CELLS = 280;   // grid cap on the long edge for SVG export
 
   const $ = (id) => document.getElementById(id);
   const canvas = $("canvas");
@@ -26,7 +27,9 @@
   const vidCanvas = document.createElement("canvas");
   const vctx = vidCanvas.getContext("2d", { willReadFrequently: true });
 
-  // recording state
+  // export state
+  let exporting = false;
+  let cancelExport = false;
   let recorder = null;
   let recording = false;
   let recChunks = [];
@@ -34,7 +37,7 @@
   // ---- effect chain state, built from the registry ----
   const chain = {};
   for (const e of Effects.REGISTRY) {
-    chain[e.id] = { enabled: false, params: { ...e.defaults } };
+    chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
   }
   chain.dither.enabled = true;
 
@@ -58,15 +61,14 @@
   // rendering — video mode: live preview, every frame runs the chain
   // =====================================================================
 
-  function frameSeed() {
-    // mix the frame index into the seed so glitches animate over time,
-    // but deterministically — preview and export show the same frames
-    const f = Math.floor((videoEl ? videoEl.currentTime : 0) * EXPORT_FPS);
-    return (seed ^ Math.imul(f + 1, 2654435761)) >>> 0;
+  function frameSeedAt(frameIndex) {
+    // deterministic per-frame seed: glitches animate over time, and the
+    // offline export reproduces exactly what the preview showed
+    return (seed ^ Math.imul(frameIndex + 1, 2654435761)) >>> 0;
   }
 
   function videoLoop() {
-    if (mode !== "video" || !videoEl) return;
+    if (mode !== "video" || !videoEl || exporting) return;
     const vw = vidCanvas.width, vh = vidCanvas.height;
 
     if (videoEl.ended || videoEl.currentTime >= clipEnd) {
@@ -77,14 +79,16 @@
 
     vctx.drawImage(videoEl, 0, 0, vw, vh);
     let frame = vctx.getImageData(0, 0, vw, vh);
-    if (!holdOriginal) frame = Effects.apply(frame, chain, frameSeed());
+    if (!holdOriginal) {
+      frame = Effects.apply(frame, chain, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)));
+    }
     if (canvas.width !== vw) canvas.width = vw;
     if (canvas.height !== vh) canvas.height = vh;
     ctx.putImageData(frame, 0, 0);
 
     if (recording) {
       $("export-video-btn").textContent =
-        `⏺ ${videoEl.currentTime.toFixed(1)}s / ${clipEnd.toFixed(1)}s`;
+        `REC ${videoEl.currentTime.toFixed(1)}S / ${clipEnd.toFixed(1)}S`;
     }
     vidRaf = requestAnimationFrame(videoLoop);
   }
@@ -108,20 +112,22 @@
     const isVideo = mode === "video";
     $("playpause-btn").hidden = !isVideo;
     $("export-video-btn").hidden = !isVideo;
-    $("download-btn").textContent = isVideo ? "↓ frame PNG" : "↓ download PNG";
-    $("playpause-btn").textContent = "⏸ pause";
+    $("res-wrap").hidden = !isVideo;
+    $("playpause-btn").textContent = "PAUSE";
   }
 
   function cleanupVideo() {
     cancelAnimationFrame(vidRaf);
+    cancelExport = true;
     if (recorder && recorder.state !== "inactive") recorder.stop();
     recording = false;
+    exporting = false;
     if (videoEl) videoEl.pause();
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     videoEl = null;
     videoUrl = null;
     $("export-video-btn").disabled = false;
-    $("export-video-btn").textContent = "⏺ export WebM";
+    $("export-video-btn").textContent = "MOV ↓";
   }
 
   function loadFromImageElement(imgEl) {
@@ -158,6 +164,7 @@
       vidCanvas.height = Math.max(1, Math.round(h * ratio));
       videoEl = v;
       mode = "video";
+      cancelExport = false;
       enterWorkspace();
       v.play().catch(() => {});
       cancelAnimationFrame(vidRaf);
@@ -215,55 +222,227 @@
     for (const [dx, dy, r] of [[0.18, 0.12, 3], [0.82, 0.2, 4], [0.65, 0.08, 2], [0.32, 0.3, 3]]) {
       c.beginPath(); c.arc(w * dx, h * dy, r, 0, Math.PI * 2); c.fill();
     }
-    c.fillStyle = "#00ffc3";
-    c.font = "bold 50px monospace";
+    c.fillStyle = "#ffffff";
+    c.font = "bold 52px Helvetica, Arial, sans-serif";
     c.textAlign = "center";
-    c.fillText("ALFIETO'S PIXEL", w / 2, h * 0.18);
+    c.fillText("VERSIONS ◉ EYE", w / 2, h * 0.18);
     loadFromImageElement(off);
   }
 
   // =====================================================================
-  // video export — record the live-previewed canvas with MediaRecorder
+  // downloads
   // =====================================================================
 
-  function pickMime() {
-    if (typeof MediaRecorder === "undefined") return null;
-    return ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
-      .find((m) => MediaRecorder.isTypeSupported(m)) || null;
+  function saveBlob(blob, filename) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
-  function stopRecorder() {
-    if (recorder && recorder.state !== "inactive") recorder.stop();
+  function downloadPng() {
+    canvas.toBlob((blob) => saveBlob(blob, `versions-eye-${seed.toString(16)}.png`), "image/png");
   }
 
-  function exportVideo() {
-    if (recording || mode !== "video" || !videoEl) return;
-    const mime = pickMime();
-    if (!mime) {
-      alert("This browser doesn't support MediaRecorder video export.");
+  // ---- SVG export: sample the canvas on a coarse grid, RLE runs per row,
+  // one <path> per color so the file stays compact and truly scalable ----
+  function exportSvg() {
+    const w = canvas.width, h = canvas.height;
+    if (!w || !h) return;
+    const img = ctx.getImageData(0, 0, w, h).data;
+
+    let cell = Math.max(1, Math.ceil(Math.max(w, h) / SVG_MAX_CELLS));
+    if (chain.dither.enabled) {
+      cell = Math.max(cell, Math.round(chain.dither.params.pixelSize));
+    }
+    const gw = Math.ceil(w / cell), gh = Math.ceil(h / cell);
+
+    // sample cell centers
+    const grid = new Int32Array(gw * gh);
+    const counts = new Map();
+    for (let gy = 0; gy < gh; gy++) {
+      for (let gx = 0; gx < gw; gx++) {
+        const x = Math.min(w - 1, gx * cell + (cell >> 1));
+        const y = Math.min(h - 1, gy * cell + (cell >> 1));
+        const i = (y * w + x) * 4;
+        const c = (img[i] << 16) | (img[i + 1] << 8) | img[i + 2];
+        grid[gy * gw + gx] = c;
+        counts.set(c, (counts.get(c) || 0) + 1);
+      }
+    }
+
+    // most common color becomes the background rect
+    let bg = 0, bgCount = -1;
+    for (const [c, n] of counts) if (n > bgCount) { bg = c; bgCount = n; }
+
+    const hex = (c) => "#" + c.toString(16).padStart(6, "0");
+    const paths = new Map(); // color -> path data
+    for (let gy = 0; gy < gh; gy++) {
+      let runColor = -1, runStart = 0;
+      for (let gx = 0; gx <= gw; gx++) {
+        const c = gx < gw ? grid[gy * gw + gx] : -1;
+        if (c !== runColor) {
+          if (runColor >= 0 && runColor !== bg) {
+            const len = gx - runStart;
+            const d = paths.get(runColor) || [];
+            d.push(`M${runStart} ${gy}h${len}v1h-${len}z`);
+            paths.set(runColor, d);
+          }
+          runColor = c;
+          runStart = gx;
+        }
+      }
+    }
+
+    let body = `<rect width="${gw}" height="${gh}" fill="${hex(bg)}"/>`;
+    for (const [c, d] of paths) {
+      body += `<path fill="${hex(c)}" d="${d.join("")}"/>`;
+    }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${gw} ${gh}" ` +
+      `width="${gw * cell}" height="${gh * cell}" shape-rendering="crispEdges">${body}</svg>`;
+    saveBlob(new Blob([svg], { type: "image/svg+xml" }), `versions-eye-${seed.toString(16)}.svg`);
+  }
+
+  // =====================================================================
+  // video export — offline render via WebCodecs → MP4/MOV container.
+  // Frames are seeked one by one, run through the chain at full export
+  // resolution, and encoded with exact 30fps timestamps, so the output
+  // is always smooth even when effects run slower than realtime.
+  // =====================================================================
+
+  function seekTo(t) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, 1000); // seeked can be skipped for tiny deltas
+      videoEl.addEventListener("seeked", () => { clearTimeout(timer); resolve(); }, { once: true });
+      videoEl.currentTime = Math.min(t, (videoEl.duration || clipEnd) - 0.001);
+    });
+  }
+
+  async function pickEncoderConfig(width, height, fps) {
+    if (typeof VideoEncoder === "undefined" || typeof Mp4Muxer === "undefined") return null;
+    const bitrate = width * height >= 3000 * 1500 ? 40_000_000 : 12_000_000;
+    const candidates = [
+      // H.264 High profile — L4.2 covers 1080p60, L5.2 covers 4K
+      { codec: height > 1200 || width > 2100 ? "avc1.640034" : "avc1.64002A", mux: "avc", ext: "mov", mime: "video/quicktime" },
+      { codec: "vp09.00.41.08", mux: "vp9", ext: "mp4", mime: "video/mp4" },
+    ];
+    for (const c of candidates) {
+      try {
+        const { supported } = await VideoEncoder.isConfigSupported({
+          codec: c.codec, width, height, bitrate, framerate: fps,
+        });
+        if (supported) return { ...c, bitrate };
+      } catch { /* try next codec */ }
+    }
+    return null;
+  }
+
+  async function offlineRender(targetShort) {
+    const aspect = vidCanvas.width / vidCanvas.height;
+    let ew, eh;
+    if (aspect >= 1) { eh = targetShort; ew = Math.round(targetShort * aspect); }
+    else { ew = targetShort; eh = Math.round(targetShort / aspect); }
+    ew -= ew % 2; eh -= eh % 2;
+
+    const cfg = await pickEncoderConfig(ew, eh, EXPORT_FPS);
+    if (!cfg) return false;
+
+    const btn = $("export-video-btn");
+    exporting = true;
+    cancelExport = false;
+    cancelAnimationFrame(vidRaf);
+    videoEl.pause();
+
+    const muxer = new Mp4Muxer.Muxer({
+      target: new Mp4Muxer.ArrayBufferTarget(),
+      video: { codec: cfg.mux, width: ew, height: eh },
+      fastStart: "in-memory",
+    });
+    let encoderError = null;
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (e) => { encoderError = e; },
+    });
+    encoder.configure({ codec: cfg.codec, width: ew, height: eh, bitrate: cfg.bitrate, framerate: EXPORT_FPS });
+
+    const ecan = document.createElement("canvas");
+    ecan.width = ew; ecan.height = eh;
+    const ectx = ecan.getContext("2d", { willReadFrequently: true });
+
+    const totalFrames = Math.max(1, Math.round(clipEnd * EXPORT_FPS));
+    let ok = true;
+    try {
+      for (let i = 0; i < totalFrames; i++) {
+        if (cancelExport || encoderError) { ok = false; break; }
+        await seekTo(i / EXPORT_FPS);
+        ectx.drawImage(videoEl, 0, 0, ew, eh);
+        let frame = ectx.getImageData(0, 0, ew, eh);
+        frame = Effects.apply(frame, chain, frameSeedAt(i));
+        ectx.putImageData(frame, 0, 0);
+        // mirror progress on the visible canvas
+        if (canvas.width !== ew) { canvas.width = ew; canvas.height = eh; }
+        ctx.putImageData(frame, 0, 0);
+
+        const vf = new VideoFrame(ecan, { timestamp: i * 1e6 / EXPORT_FPS, duration: 1e6 / EXPORT_FPS });
+        encoder.encode(vf, { keyFrame: i % (EXPORT_FPS * 2) === 0 });
+        vf.close();
+        while (encoder.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 5));
+        btn.textContent = `RENDERING ${Math.round(((i + 1) / totalFrames) * 100)}% — CLICK TO CANCEL`;
+      }
+      if (ok) {
+        await encoder.flush();
+        muxer.finalize();
+        saveBlob(new Blob([muxer.target.buffer], { type: cfg.mime }),
+          `versions-eye-${seed.toString(16)}.${cfg.ext}`);
+      }
+    } catch (e) {
+      console.error("export failed:", e, encoderError);
+      ok = false;
+    } finally {
+      try { if (encoder.state !== "closed") encoder.close(); } catch { /* already closed */ }
+      exporting = false;
+      btn.disabled = false;
+      btn.textContent = "MOV ↓";
+      if (videoEl) {
+        videoEl.currentTime = 0;
+        videoEl.play().catch(() => {});
+        vidRaf = requestAnimationFrame(videoLoop);
+      }
+    }
+    return ok;
+  }
+
+  // realtime fallback for browsers without WebCodecs: record the preview
+  // canvas with MediaRecorder (mp4 where supported, else webm)
+  function realtimeRecord() {
+    if (typeof MediaRecorder === "undefined") {
+      alert("This browser supports neither WebCodecs nor MediaRecorder — video export unavailable.");
       return;
     }
+    const pick = [
+      ["video/mp4;codecs=avc1.64002A", "mov"],
+      ["video/mp4", "mov"],
+      ["video/webm;codecs=vp9", "webm"],
+      ["video/webm;codecs=vp8", "webm"],
+      ["video/webm", "webm"],
+    ].find(([m]) => MediaRecorder.isTypeSupported(m));
+    if (!pick) { alert("No supported recording format found."); return; }
+    const [mime, ext] = pick;
+
     const btn = $("export-video-btn");
     btn.disabled = true;
-    btn.textContent = "⏺ starting…";
-
     const stream = canvas.captureStream(EXPORT_FPS);
-    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 });
     recChunks = [];
     recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
     recorder.onstop = () => {
-      const blob = new Blob(recChunks, { type: recorder.mimeType || "video/webm" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `alfietos-pixel-${seed.toString(16)}.webm`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      saveBlob(new Blob(recChunks, { type: recorder.mimeType || mime }),
+        `versions-eye-${seed.toString(16)}.${ext}`);
       recording = false;
       btn.disabled = false;
-      btn.textContent = "⏺ export WebM";
+      btn.textContent = "MOV ↓";
     };
-
-    // restart the clip so the export covers 0 → clipEnd, then record
     const begin = () => {
       videoEl.play().catch(() => {});
       recorder.start(200);
@@ -277,6 +456,27 @@
     }
   }
 
+  function stopRecorder() {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }
+
+  async function exportVideo() {
+    if (mode !== "video" || !videoEl || recording) return;
+    if (exporting) { cancelExport = true; return; } // second click cancels
+    const res = $("export-res").value;
+    const btn = $("export-video-btn");
+    if (res === "preview") {
+      realtimeRecord();
+      return;
+    }
+    btn.textContent = "STARTING…";
+    const ok = await offlineRender(parseInt(res, 10));
+    if (!ok && !cancelExport) {
+      // WebCodecs unavailable or codec rejected — fall back to realtime
+      realtimeRecord();
+    }
+  }
+
   // =====================================================================
   // controls UI
   // =====================================================================
@@ -284,6 +484,54 @@
   function fmt(v, p) {
     const num = typeof v === "number" ? (p.step >= 1 ? v : v.toFixed(2)) : v;
     return `${num}${p.unit || ""}`;
+  }
+
+  const HEX_RE = /^#?([0-9a-f]{6})$/i;
+
+  function buildColorParam(state, p) {
+    const wrap = document.createElement("div");
+    wrap.className = "color-row";
+    const arr = state.params[p.key];
+    for (let ci = 0; ci < p.count; ci++) {
+      const item = document.createElement("div");
+      item.className = "color-item";
+      const cIn = document.createElement("input");
+      cIn.type = "color";
+      cIn.value = HEX_RE.test(arr[ci] || "") ? arr[ci] : "#000000";
+      const tIn = document.createElement("input");
+      tIn.type = "text";
+      tIn.placeholder = ci < 2 ? "#rrggbb" : "#rrggbb (optional)";
+      tIn.maxLength = 7;
+      tIn.value = arr[ci] || "";
+      cIn.addEventListener("input", () => {
+        arr[ci] = cIn.value;
+        tIn.value = cIn.value;
+        tIn.classList.remove("invalid");
+        render();
+      });
+      tIn.addEventListener("input", () => {
+        const raw = tIn.value.trim();
+        if (raw === "" && ci >= 2) { // third color is optional
+          arr[ci] = "";
+          tIn.classList.remove("invalid");
+          render();
+          return;
+        }
+        const m = HEX_RE.exec(raw);
+        if (m) {
+          const v = "#" + m[1].toLowerCase();
+          arr[ci] = v;
+          cIn.value = v;
+          tIn.classList.remove("invalid");
+          render();
+        } else {
+          tIn.classList.add("invalid");
+        }
+      });
+      item.append(cIn, tIn);
+      wrap.appendChild(item);
+    }
+    return wrap;
   }
 
   function buildControls() {
@@ -341,6 +589,9 @@
           });
           row.appendChild(sel);
           valEl.remove();
+        } else if (p.type === "colors") {
+          row.appendChild(buildColorParam(state, p));
+          valEl.remove();
         } else {
           const slider = document.createElement("input");
           slider.type = "range";
@@ -390,6 +641,9 @@
       for (const p of e.params) {
         if (p.type === "select") {
           state.params[p.key] = p.options[Math.floor(rng() * p.options.length)][0];
+        } else if (p.type === "colors") {
+          state.params[p.key] = Array.from({ length: p.count },
+            () => "#" + Math.floor(rng() * 0x1000000).toString(16).padStart(6, "0"));
         } else {
           const span = p.max - p.min;
           let v = p.min + rng() * span;
@@ -409,21 +663,11 @@
 
   function resetAll() {
     for (const e of Effects.REGISTRY) {
-      chain[e.id] = { enabled: false, params: { ...e.defaults } };
+      chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
     }
     chain.dither.enabled = true;
     syncControls();
     render();
-  }
-
-  function download() {
-    canvas.toBlob((blob) => {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `alfietos-pixel-${seed.toString(16)}.png`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }, "image/png");
   }
 
   // =====================================================================
@@ -468,7 +712,8 @@
   });
   $("random-btn").addEventListener("click", randomizeAll);
   $("reset-btn").addEventListener("click", resetAll);
-  $("download-btn").addEventListener("click", download);
+  $("download-btn").addEventListener("click", downloadPng);
+  $("svg-btn").addEventListener("click", exportSvg);
   $("export-video-btn").addEventListener("click", exportVideo);
   $("new-image-btn").addEventListener("click", () => {
     cleanupVideo();
@@ -481,10 +726,10 @@
     if (!videoEl) return;
     if (videoEl.paused) {
       videoEl.play().catch(() => {});
-      $("playpause-btn").textContent = "⏸ pause";
+      $("playpause-btn").textContent = "PAUSE";
     } else {
       videoEl.pause();
-      $("playpause-btn").textContent = "▶ play";
+      $("playpause-btn").textContent = "PLAY";
     }
   });
 
