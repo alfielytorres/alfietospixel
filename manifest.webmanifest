@@ -1,0 +1,16 @@
+{
+  "name": "VERSIONS EYE — glitch studio",
+  "short_name": "VERSIONS EYE",
+  "description": "Client-side glitch studio: dither, glitch and overlay images and video, export PNG / SVG / MOV.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f4f0",
+  "theme_color": "#f5f4f0",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

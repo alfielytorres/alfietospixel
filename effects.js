@@ -497,12 +497,15 @@ const Effects = (() => {
   const OVERLAY_MODULES = {
     orbs: {
       name: "ORBS",
-      defaults: { spacing: 14, size: 1, glow: 0.6, intensity: 1, layout: "hex", colorMode: "image", color: "#7fd8ff" },
+      defaults: { spacing: 14, size: 1, glow: 0.6, intensity: 1, speed: 0.25, dithered: true, layout: "hex", colorMode: "image", color: "#7fd8ff" },
       params: [
         { key: "spacing", label: "orb spacing", min: 6, max: 48, step: 1, unit: "px" },
         { key: "size", label: "orb size", min: 0.2, max: 1.6, step: 0.05 },
         { key: "glow", label: "glow", min: 0, max: 1, step: 0.05 },
         { key: "intensity", label: "intensity", min: 0, max: 2, step: 0.05 },
+        { key: "speed", label: "animation speed", min: 0.05, max: 1, step: 0.05 },
+        { key: "dithered", label: "glow style", type: "select",
+          options: [[true, "dithered"], [false, "smooth"]] },
         { key: "layout", label: "layout", type: "select",
           options: [["hex", "hex grid"], ["square", "square grid"]] },
         { key: "colorMode", label: "color mode", type: "select",
@@ -513,7 +516,7 @@ const Effects = (() => {
     lines: {
       name: "LINES",
       defaults: { direction: "horizontal", spacing: 8, thickness: 2, wave: 12, balance: "balanced",
-        glow: 0.4, intensity: 0.85, colorMode: "image", color: "#ffffff" },
+        glow: 0.5, dithered: true, intensity: 0.85, colorMode: "image", color: "#ffffff" },
       params: [
         { key: "direction", label: "direction", type: "select",
           options: [["horizontal", "horizontal"], ["vertical", "vertical"]] },
@@ -523,6 +526,8 @@ const Effects = (() => {
         { key: "balance", label: "balance", type: "select",
           options: [["balanced", "balanced"], ["start", "heavier left / top"], ["end", "heavier right / bottom"]] },
         { key: "glow", label: "glow", min: 0, max: 1, step: 0.05 },
+        { key: "dithered", label: "glow style", type: "select",
+          options: [[true, "dithered"], [false, "smooth"]] },
         { key: "intensity", label: "opacity", min: 0, max: 1, step: 0.05 },
         { key: "colorMode", label: "color mode", type: "select",
           options: [["image", "image colors"], ["custom", "custom color"]] },
@@ -584,7 +589,15 @@ const Effects = (() => {
 
   // full-frame orb grid: each cell samples the image beneath — brighter
   // spots grow bigger, hotter orbs with a soft additive bloom
-  function drawOrbsModule(d, w, h, src, p) {
+  let orbCache = null; // per-cell smoothed brightness so orbs ease instead of flicker
+
+  function ditherKeep(a, x, y) {
+    // Bayer-threshold the alpha so soft falloffs render as retro stipple
+    const t = (BAYER_4[y & 3][x & 3] + 0.5) / 16;
+    return a > t;
+  }
+
+  function drawOrbsModule(d, w, h, src, p, temporal) {
     const spacing = Math.max(4, Math.round(p.spacing));
     const hexGrid = p.layout === "hex";
     const custom = p.colorMode === "custom" ? (hexToRgb(p.color) || [255, 255, 255]) : null;
@@ -592,6 +605,11 @@ const Effects = (() => {
     const gain = p.intensity;
     const rows = Math.ceil(h / spacing) + 1;
     const cols = Math.ceil(w / spacing) + 1;
+    const cacheKey = w + "x" + h + "x" + spacing + p.layout;
+    if (!orbCache || orbCache.key !== cacheKey) {
+      orbCache = { key: cacheKey, v: new Float32Array(rows * cols) };
+    }
+    const ease = temporal ? p.speed : 1;
 
     for (let gy = 0; gy < rows; gy++) {
       const offX = hexGrid && (gy & 1) ? spacing / 2 : 0;
@@ -601,7 +619,10 @@ const Effects = (() => {
         const sx = Math.min(w - 1, Math.max(0, Math.round(cx)));
         const sy = Math.min(h - 1, Math.max(0, Math.round(cy)));
         const si = (sy * w + sx) * 4;
-        const v = (0.2126 * src[si] + 0.7152 * src[si + 1] + 0.0722 * src[si + 2]) / 255;
+        const target = (0.2126 * src[si] + 0.7152 * src[si + 1] + 0.0722 * src[si + 2]) / 255;
+        const ci = gy * cols + gx;
+        const v = orbCache.v[ci] + (target - orbCache.v[ci]) * ease;
+        orbCache.v[ci] = v;
         if (v < 0.05) continue;
 
         const r = v * maxR;
@@ -625,6 +646,7 @@ const Effects = (() => {
             else if (dist < reach) {
               const t = (reach - dist) / (reach - r || 1);
               a = t * t * (0.25 + 0.75 * p.glow);
+              if (p.dithered && !ditherKeep(a, x, y)) continue;
             } else continue;
             a *= gain * v;
             const i = (y * w + x) * 4;
@@ -646,7 +668,7 @@ const Effects = (() => {
     const spacing = Math.max(2, Math.round(p.spacing));
     const th = Math.max(1, Math.round(p.thickness));
     const wave = p.wave, alpha = p.intensity, bal = p.balance;
-    const glowReach = th / 2 + spacing * 0.6 * p.glow;
+    const glowReach = th / 2 + spacing * 1.6 * p.glow;
     const L = vertical ? w : h, M = vertical ? h : w;
     const count = Math.ceil(L / spacing) + 1;
 
@@ -682,31 +704,33 @@ const Effects = (() => {
         const hi = Math.min(L - 1, Math.ceil(center + glowReach));
         for (let t = lo; t <= hi; t++) {
           const dist = Math.abs(t - center);
-          let shape;
-          if (dist <= th / 2) shape = 1;
-          else if (dist <= glowReach) {
-            const u = (glowReach - dist) / (glowReach - th / 2 || 1);
-            shape = u * u * p.glow;
-          } else continue;
-          const a = a0 * shape;
-          if (a <= 0.004) continue;
           const px = vertical ? t : m, py = vertical ? m : t;
           const i = (py * w + px) * 4;
-          d[i] += (cr - d[i]) * a;
-          d[i + 1] += (cg - d[i + 1]) * a;
-          d[i + 2] += (cb - d[i + 2]) * a;
+          if (dist <= th / 2) { // solid core: alpha-blend so dark lines work
+            d[i] += (cr - d[i]) * a0;
+            d[i + 1] += (cg - d[i + 1]) * a0;
+            d[i + 2] += (cb - d[i + 2]) * a0;
+          } else if (dist <= glowReach) { // glow skirt: additive light
+            const u = (glowReach - dist) / (glowReach - th / 2 || 1);
+            let a = u * u * p.glow * a0;
+            if (a <= 0.004) continue;
+            if (p.dithered && !ditherKeep(a, px, py)) continue;
+            d[i] = clamp255(d[i] + cr * a);
+            d[i + 1] = clamp255(d[i + 1] + cg * a);
+            d[i + 2] = clamp255(d[i + 2] + cb * a);
+          } else continue;
         }
       }
     }
   }
 
-  function renderOverlayStack(img, modules, stars) {
+  function renderOverlayStack(img, modules, stars, temporal) {
     const anyModule = modules && (modules.orbs.enabled || modules.lines.enabled);
     if (!anyModule && (!stars || !stars.length)) return img;
     const res = clone(img);
     const d = res.data, w = res.width, h = res.height;
     const src = img.data; // sample the pre-overlay image so modules react to IT
-    if (modules && modules.orbs.enabled) drawOrbsModule(d, w, h, src, modules.orbs.params);
+    if (modules && modules.orbs.enabled) drawOrbsModule(d, w, h, src, modules.orbs.params, temporal);
     if (modules && modules.lines.enabled) drawLinesModule(d, w, h, src, modules.lines.params);
     for (const s of stars || []) drawStar(d, w, h, s);
     return res;

@@ -63,7 +63,7 @@
       let out = sourceImage;
       if (!holdOriginal) {
         out = Effects.apply(sourceImage, chain, seed);
-        out = Effects.renderOverlayStack(out, overlayModules, stars);
+        out = Effects.renderOverlayStack(out, overlayModules, stars, false);
       }
       canvas.width = out.width;
       canvas.height = out.height;
@@ -100,7 +100,7 @@
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
       frame = Effects.apply(frame, chain, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)));
-      frame = Effects.renderOverlayStack(frame, overlayModules, stars);
+      frame = Effects.renderOverlayStack(frame, overlayModules, stars, true);
     }
     if (canvas.width !== vw) canvas.width = vw;
     if (canvas.height !== vh) canvas.height = vh;
@@ -563,7 +563,7 @@
         pctx.drawImage(videoEl, 0, 0, pw, ph);
         let frame = pctx.getImageData(0, 0, pw, ph);
         frame = Effects.apply(frame, chain, frameSeedAt(i));
-        frame = Effects.renderOverlayStack(frame, overlayModules, stars);
+        frame = Effects.renderOverlayStack(frame, overlayModules, stars, true);
         pctx.putImageData(frame, 0, 0);
         ectx.drawImage(pcan, 0, 0, ew, eh); // crisp nearest-neighbor upscale
         // mirror progress on the visible canvas at preview size
@@ -829,7 +829,8 @@
 
   function addStar() {
     stars.push(structuredClone(Effects.STAR_TYPE.defaults));
-    buildOverlayList();
+    buildStarList();
+    updateChips();
     render();
   }
 
@@ -854,7 +855,11 @@
         sel.appendChild(opt);
       }
       sel.value = String(get());
-      sel.addEventListener("change", () => { set(sel.value); render(); });
+      sel.addEventListener("change", () => {
+        const raw = sel.value;
+        set(raw === "true" ? true : raw === "false" ? false : raw);
+        render();
+      });
       row.appendChild(sel);
       valEl.remove();
     } else if (p.type === "color") {
@@ -901,7 +906,12 @@
   }
 
   function buildOverlayList() {
-    const list = $("overlay-list");
+    buildOverlayModules();
+    buildStarList();
+  }
+
+  function buildOverlayModules() {
+    const list = $("overlay-module-list");
     list.innerHTML = "";
 
     // --- ORBS / LINES modules: one toggleable block each, like filters ---
@@ -948,8 +958,11 @@
       box.append(head, body);
       list.appendChild(box);
     }
+  }
 
-    // --- STAR instances: added one by one, draggable on the canvas ---
+  function buildStarList() {
+    const list = $("star-list");
+    list.innerHTML = "";
     stars.forEach((o, idx) => {
       const item = document.createElement("div");
       item.className = "overlay-item";
@@ -970,7 +983,8 @@
       rm.setAttribute("aria-label", `remove star ${idx + 1}`);
       rm.addEventListener("click", () => {
         stars.splice(idx, 1);
-        buildOverlayList();
+        buildStarList();
+        updateChips();
         render();
       });
       head.append(name, colorIn, rm);
@@ -1023,6 +1037,7 @@
   // =====================================================================
 
   function randomizeAll() {
+    closeSheet(true);
     seed = (Math.random() * 0xffffffff) >>> 0;
     const rng = Effects.makeRng(seed);
     for (const e of Effects.REGISTRY) {
@@ -1052,6 +1067,7 @@
   }
 
   function resetAll() {
+    closeSheet(true);
     for (const e of Effects.REGISTRY) {
       chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
     }
@@ -1135,6 +1151,95 @@
 
   $("add-star-btn").addEventListener("click", addStar);
 
+  // =====================================================================
+  // mobile chips + bottom sheet (VSCO-style): the chip bar lists every
+  // tool; tapping one lifts its existing control block into a bottom
+  // sheet, so all editing happens under the sticky preview
+  // =====================================================================
+
+  const CHIP_DEFS = [
+    ...Effects.REGISTRY.map((e) => ({ id: e.id, label: e.name, kind: "effect" })),
+    { id: "orbs", label: "ORBS", kind: "module" },
+    { id: "lines", label: "LINES", kind: "module" },
+    { id: "stars", label: "STARS", kind: "stars" },
+  ];
+  let sheetStash = null;
+
+  function chipEnabled(def) {
+    if (def.kind === "effect") return chain[def.id].enabled;
+    if (def.kind === "module") return overlayModules[def.id].enabled;
+    return stars.length > 0;
+  }
+
+  function updateChips() {
+    document.querySelectorAll("#chip-bar .chip[data-chip]").forEach((el) => {
+      const def = CHIP_DEFS.find((c) => c.id === el.dataset.chip);
+      if (def) el.classList.toggle("on", chipEnabled(def));
+    });
+  }
+
+  function buildChips() {
+    const bar = $("chip-bar");
+    bar.innerHTML = "";
+    for (const def of CHIP_DEFS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip" + (chipEnabled(def) ? " on" : "");
+      b.dataset.chip = def.id;
+      b.textContent = def.label;
+      b.addEventListener("click", () => openSheetFor(def));
+      bar.appendChild(b);
+    }
+    const rst = document.createElement("button");
+    rst.type = "button";
+    rst.className = "chip chip-reset";
+    rst.textContent = "RESET";
+    rst.addEventListener("click", resetAll);
+    bar.appendChild(rst);
+  }
+
+  function openSheetFor(def) {
+    closeSheet(true);
+    let node;
+    if (def.kind === "effect") node = document.querySelector(`.effect[data-effect="${def.id}"]`);
+    else if (def.kind === "module") node = document.querySelector(`[data-overlay-module="${def.id}"]`);
+    else node = $("star-section");
+    if (!node) return;
+    sheetStash = { node, parent: node.parentNode, next: node.nextSibling };
+    $("sheet-title").textContent = def.label;
+    $("sheet-content").appendChild(node);
+    if (node.classList.contains("effect")) node.classList.add("open");
+    const sheet = $("chip-sheet");
+    sheet.hidden = false;
+    requestAnimationFrame(() => sheet.classList.add("open"));
+  }
+
+  function closeSheet(instant) {
+    const sheet = $("chip-sheet");
+    if (sheet.hidden) return;
+    if (sheetStash) {
+      sheetStash.parent.insertBefore(sheetStash.node, sheetStash.next);
+      sheetStash = null;
+    }
+    sheet.classList.remove("open");
+    if (instant) sheet.hidden = true;
+    else setTimeout(() => { sheet.hidden = true; }, 220);
+    updateChips();
+  }
+
+  $("sheet-close").addEventListener("click", () => closeSheet(false));
+  document.addEventListener("change", (ev) => {
+    if (ev.target && ev.target.classList && ev.target.classList.contains("effect-toggle")) {
+      updateChips();
+    }
+  });
+
+  // ---- PWA: offline app shell + add-to-home-screen ----
+  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+
   buildControls();
   buildOverlayList();
+  buildChips();
 })();

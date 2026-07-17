@@ -37,12 +37,16 @@ A separate **OVERLAYS** group sits on top of the filter chain output:
 
 - **ORBS** — a full-frame module (toggle on/off like a filter): a hex or
   square grid of glowing orbs that **distort around the image** — brighter
-  areas grow bigger, hotter orbs. Glow slider, intensity, and color mode:
-  the image's own colors or a custom picked color (widget + hex).
+  areas grow bigger, hotter orbs. In video they **ease toward the picture**
+  instead of flickering (animation-speed slider). Glow slider, intensity,
+  a **dithered glow style** (Bayer-stippled falloff that matches the dither
+  aesthetic; smooth optional), and color mode: image colors or a custom
+  picked color (widget + hex).
 - **LINES** — full-frame scan lines that **bend around the brightness of
-  the image beneath** (distort-by-image slider), with a glow skirt,
-  direction, spacing, thickness, opacity, color mode (image / custom), and
-  **balance**: balanced, heavier left/top, or heavier right/bottom (skewed).
+  the image beneath** (distort-by-image slider), with a wide additive glow
+  skirt (also dithered or smooth), direction, spacing, thickness, opacity,
+  color mode (image / custom), and **balance**: balanced, heavier left/top,
+  or heavier right/bottom (skewed).
 - **STAR** — added one by one with **+ STAR**, each an anamorphic lens
   star (streak + vertical spike + core) with its own color, and
   **draggable directly on the canvas**.
@@ -114,6 +118,16 @@ matrices; Atkinson diffuses 6/8 of the error for a brighter look.
   tip) instead of a silent black canvas.
 
 ## Phones
+
+The mobile layout is app-like (VSCO-style): the preview sticks to the top,
+a horizontally scrolling **chip bar** lists every tool, and tapping a chip
+opens that tool's controls in a **bottom sheet** — no scrolling through a
+long panel. Touch targets and sliders are enlarged on touch screens.
+
+The studio is also a **PWA**: open it in the browser, choose "Add to Home
+Screen", and it installs with the versions icon and works offline (the app
+shell is pre-cached by a service worker; the HEIC decoder caches on first
+use).
 
 On iPhone and Android, exports open the **native share sheet** (Web Share
 API) instead of a plain download, so results can go straight to Photos,

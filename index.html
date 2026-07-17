@@ -5,10 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VERSIONS EYE — glitch studio</title>
 <link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f5f4f0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="VERSIONS EYE">
 </head>
 <body>
 <header class="site-header">
-  <div class="wordmark">VERSIONS<span class="eye">◉</span>EYE</div>
+  <div class="wordmark"><img src="icons/versions-logo.png" alt="versions" class="wordmark-img"><span class="eye">◉</span>EYE</div>
   <nav class="site-nav">
     <span class="nav-item">GLITCH STUDIO</span>
     <span class="nav-item muted">EST. 2026</span>
@@ -37,6 +45,7 @@
       <div class="canvas-wrap">
         <canvas id="canvas"></canvas>
       </div>
+      <div id="chip-bar" class="chip-bar"></div>
       <div class="canvas-actions">
         <button id="new-image-btn" class="btn" type="button">NEW FILE</button>
         <button id="original-btn" class="btn" type="button">HOLD FOR ORIGINAL</button>
@@ -72,15 +81,28 @@
 
       <div class="controls-header overlays-header">
         <div class="index-label">02.2 — OVERLAYS</div>
-        <div class="overlay-add">
+      </div>
+      <p class="hint">ORBS and LINES cover the whole frame and distort around the image beneath them.</p>
+      <div id="overlay-module-list"></div>
+      <div id="star-section">
+        <div class="controls-header star-header">
+          <div class="index-label">STARS</div>
           <button id="add-star-btn" class="btn btn-small" type="button">+ STAR</button>
         </div>
+        <p class="hint">Added one by one — <strong>drag them on the canvas</strong> to position them.</p>
+        <div id="star-list"></div>
       </div>
-      <p class="hint">ORBS and LINES cover the whole frame and distort around the image beneath them. STARs are added one by one — <strong>drag them on the canvas</strong> to position them.</p>
-      <div id="overlay-list"></div>
     </aside>
   </section>
 </main>
+
+<div id="chip-sheet" class="sheet" hidden>
+  <div class="sheet-head">
+    <span id="sheet-title" class="index-label"></span>
+    <button id="sheet-close" class="btn btn-small" type="button">DONE</button>
+  </div>
+  <div id="sheet-content"></div>
+</div>
 
 <div id="loader" class="loader" hidden>
   <div class="loader-box">
