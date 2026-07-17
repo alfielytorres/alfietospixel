@@ -1365,7 +1365,7 @@
     const off = document.createElement("canvas");
     off.width = w; off.height = h;
     const g = off.getContext("2d");
-    g.font = `800 ${Math.round(h * 0.82)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    g.font = `700 ${Math.round(h * 0.82)}px "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif`;
     g.textAlign = "center";
     g.textBaseline = "middle";
     g.fillText("versions", w / 2, h * 0.56);
@@ -1392,6 +1392,9 @@
     }
   }
   drawWordmarkArt();
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(drawWordmarkArt); // redraw once Inter is in
+  }
   let artResizeT = 0;
   window.addEventListener("resize", () => {
     clearTimeout(artResizeT);

@@ -32,6 +32,14 @@ code, kbd, .value, .res-label, select, .index-label {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/inter-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---- header ---- */
 .site-header {
   display: flex;
@@ -42,13 +50,15 @@ code, kbd, .value, .res-label, select, .index-label {
 }
 .header-cta { font-size: .74rem; }
 .wordmark {
+  font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-weight: 700;
-  font-size: .9rem;
-  letter-spacing: .22em;
+  font-size: 1.15rem;
+  letter-spacing: -.045em; /* tight kerning like the brand logo */
+  text-transform: lowercase;
   display: flex;
   align-items: center;
+  background: transparent;
 }
-.wordmark-img { height: 1.15em; display: block; }
 .wordmark .eye, .site-footer .eye {
   color: var(--accent);
   margin: 0 .35em;

@@ -1,7 +1,7 @@
 /* VERSIONS EYE service worker — precache the app shell so the studio
  * works offline / from the home screen; runtime-cache everything else
  * same-origin (e.g. the lazy HEIC decoder) on first use. */
-const CACHE = "versions-eye-v3";
+const CACHE = "versions-eye-v4";
 const SHELL = [
   "./",
   "index.html",
@@ -10,7 +10,7 @@ const SHELL = [
   "effects.js",
   "vendor/mp4-muxer.js",
   "manifest.webmanifest",
-  "icons/versions-logo.png",
+  "fonts/inter-700.woff2",
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/favicon-32.png",
