@@ -329,6 +329,49 @@ select:focus { border-color: var(--ink); outline: none; }
 .color-item input[type="text"]:focus { border-color: var(--ink); outline: none; }
 .color-item input[type="text"].invalid { border-color: #cc2222; color: #cc2222; }
 
+/* ---- loader overlay ---- */
+.loader {
+  position: fixed;
+  inset: 0;
+  background: rgba(245, 244, 240, .82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.loader-box {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--ink);
+  padding: 1.1rem 1.6rem;
+}
+.loader-box span {
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+.loader-bar {
+  width: 110px;
+  height: 2px;
+  background: var(--hairline);
+  position: relative;
+  overflow: hidden;
+}
+.loader-bar::after {
+  content: "";
+  position: absolute;
+  top: 0; left: -36px;
+  width: 36px; height: 100%;
+  background: var(--accent);
+  animation: loader-slide .9s linear infinite;
+}
+@keyframes loader-slide {
+  to { left: 110px; }
+}
+
 /* ---- footer ---- */
 .site-footer {
   display: flex;

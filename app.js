@@ -73,6 +73,7 @@
       vidRaf = requestAnimationFrame(videoLoop);
       return;
     }
+    hideLoader(); // first decodable frame has arrived
     const vw = vidCanvas.width, vh = vidCanvas.height;
 
     if (videoEl.ended || videoEl.currentTime >= clipEnd) {
@@ -105,6 +106,14 @@
   // =====================================================================
   // loading
   // =====================================================================
+
+  function showLoader(text) {
+    $("loader-text").textContent = text;
+    $("loader").hidden = false;
+  }
+  function hideLoader() {
+    $("loader").hidden = true;
+  }
 
   function enterWorkspace() {
     $("dropzone").hidden = true;
@@ -169,9 +178,11 @@
   }
 
   async function loadHeicFile(file) {
+    showLoader("DECODING HEIC…");
     try { // native decode first (Safari, some Android)
       const bmp = await createImageBitmap(file);
       loadFromImageElement(bmp);
+      hideLoader();
       return;
     } catch { /* fall through to wasm decoder */ }
     try {
@@ -194,11 +205,14 @@
     } catch (e) {
       console.error(e);
       alert("Couldn't decode this HEIC image in this browser. Try converting it to JPEG/PNG.");
+    } finally {
+      hideLoader();
     }
   }
 
   function loadVideoFile(file) {
     cleanupVideo();
+    showLoader("LOADING VIDEO…");
     videoUrl = URL.createObjectURL(file);
     const v = document.createElement("video");
     v.muted = true;
@@ -206,6 +220,7 @@
     v.preload = "auto";
     const looksApple = /quicktime|\.mov$|\.m4v$/i.test(file.type + " " + (file.name || ""));
     v.addEventListener("error", () => {
+      hideLoader();
       cleanupVideo();
       $("workspace").hidden = true;
       $("dropzone").hidden = false;
@@ -217,7 +232,7 @@
     });
     v.addEventListener("loadedmetadata", () => {
       const w = v.videoWidth, h = v.videoHeight;
-      if (!w || !h) { cleanupVideo(); return; }
+      if (!w || !h) { hideLoader(); cleanupVideo(); return; }
       clipEnd = Math.min(v.duration || MAX_CLIP_SECONDS, MAX_CLIP_SECONDS);
       const ratio = Math.min(1, MAX_VIDEO_DIM / Math.max(w, h));
       vidCanvas.width = Math.max(1, Math.round(w * ratio));
@@ -246,11 +261,13 @@
     if (isHeif) { loadHeicFile(file); return; }
     if (isVideo) { loadVideoFile(file); return; }
     if (!isImage) return;
+    showLoader("LOADING IMAGE…");
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => { loadFromImageElement(img); URL.revokeObjectURL(url); };
+    img.onload = () => { loadFromImageElement(img); URL.revokeObjectURL(url); hideLoader(); };
     img.onerror = () => {
       URL.revokeObjectURL(url);
+      hideLoader();
       // HEIC files sometimes arrive typed as plain image/* — try the decoder
       loadHeicFile(file);
     };

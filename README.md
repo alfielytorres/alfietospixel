@@ -24,6 +24,8 @@ Effects toggle on/off and stack top-to-bottom:
 | --- | --- |
 | **POSTER BURN** | posterize + hue rotate + solarize |
 | **DITHER** | pixelate + palette + ordered (Bayer 4×4/8×8), Floyd–Steinberg (raster or serpentine), Atkinson, or hard threshold |
+| **LINE SCREEN** | brightness becomes wavy horizontal/vertical contour lines (oscilloscope ripple) — control spacing, thickness and wave amount |
+| **ORBS** | glowing dot-halftone: a hex or square grid of orbs that grow and bloom with brightness |
 | **PIXEL SORT** | sorts runs of pixels by brightness inside a threshold band |
 | **RGB SHIFT** | chromatic aberration / channel displacement at any angle |
 | **SLICE GLITCH** | horizontal bands ripped sideways with optional channel tear |

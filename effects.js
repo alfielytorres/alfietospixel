@@ -200,6 +200,154 @@ const Effects = (() => {
   }
 
   // ======================================================================
+  // LINE SCREEN — image brightness becomes wavy contour lines (the
+  // oscilloscope/CRT ripple look): brighter areas draw thicker lines and
+  // push them further off their track
+  // ======================================================================
+
+  function lineScreen(img, params) {
+    const w = img.width, h = img.height;
+    const src = img.data;
+    const res = new ImageData(w, h);
+    const d = res.data;
+    const vertical = params.direction === "vertical";
+    const spacing = Math.max(2, Math.round(params.spacing));
+    const weight = params.thickness;
+    const wave = params.wave;
+    const mode = params.color;
+
+    // background fill
+    const bg = mode === "paper" ? 240 : 8;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = bg; d[i + 1] = bg; d[i + 2] = bg; d[i + 3] = 255;
+    }
+
+    const L = vertical ? w : h; // axis the lines repeat along
+    const M = vertical ? h : w; // axis each line runs along
+
+    const lines = Math.ceil(L / spacing);
+    for (let k = 0; k <= lines; k++) {
+      const base = k * spacing + (spacing >> 1);
+      const cb = Math.min(L - 1, Math.max(0, base));
+      let bSmooth = -1;
+      for (let m = 0; m < M; m++) {
+        const sx = vertical ? cb : m;
+        const sy = vertical ? m : cb;
+        const si = (sy * w + sx) * 4;
+        let b = (0.2126 * src[si] + 0.7152 * src[si + 1] + 0.0722 * src[si + 2]) / 255;
+        // running smooth along the line keeps the contours flowing
+        bSmooth = bSmooth < 0 ? b : bSmooth * 0.72 + b * 0.28;
+        b = bSmooth;
+
+        const center = base - b * wave;
+        const half = Math.max(0.5, b * spacing * 0.5 * weight);
+        let r, g, bl;
+        if (mode === "image") {
+          const boost = 0.55 + 0.85 * b;
+          r = clamp255(src[si] * boost + 24 * b);
+          g = clamp255(src[si + 1] * boost + 24 * b);
+          bl = clamp255(src[si + 2] * boost + 24 * b);
+        } else if (mode === "paper") {
+          r = g = bl = 18;
+        } else {
+          r = g = bl = 255;
+        }
+
+        const c0 = Math.round(center - half), c1 = Math.round(center + half);
+        for (let t = c0; t <= c1; t++) {
+          if (t < 0 || t >= L) continue;
+          const px = vertical ? t : m;
+          const py = vertical ? m : t;
+          const di = (py * w + px) * 4;
+          d[di] = r; d[di + 1] = g; d[di + 2] = bl;
+        }
+      }
+    }
+    return res;
+  }
+
+  // ======================================================================
+  // ORB HALFTONE — the image becomes a grid of glowing orbs: brighter
+  // areas grow bigger, hotter dots with a soft bloom falloff
+  // ======================================================================
+
+  function orbHalftone(img, params) {
+    const w = img.width, h = img.height;
+    const src = img.data;
+    const res = new ImageData(w, h);
+    const d = res.data;
+    const spacing = Math.max(4, Math.round(params.spacing));
+    const sizeMul = params.size;
+    const glow = params.glow;
+    const hex = params.layout === "hex";
+    const mode = params.color;
+
+    const bg = mode === "paper" ? 242 : 4;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = bg; d[i + 1] = bg; d[i + 2] = bg; d[i + 3] = 255;
+    }
+
+    const rows = Math.ceil(h / spacing) + 1;
+    const cols = Math.ceil(w / spacing) + 1;
+    const maxR = spacing * 0.5 * sizeMul;
+    const glowR = maxR * (0.4 + glow * 1.6); // bloom reach beyond the core
+
+    for (let gy = 0; gy < rows; gy++) {
+      const offX = hex && (gy & 1) ? spacing / 2 : 0;
+      for (let gx = 0; gx < cols; gx++) {
+        const cx = gx * spacing + offX;
+        const cy = gy * spacing + (hex ? spacing * 0.43 : spacing / 2);
+        const sx = Math.min(w - 1, Math.max(0, Math.round(cx)));
+        const sy = Math.min(h - 1, Math.max(0, Math.round(cy)));
+        const si = (sy * w + sx) * 4;
+        const b = (0.2126 * src[si] + 0.7152 * src[si + 1] + 0.0722 * src[si + 2]) / 255;
+        // paper mode inverts: dark areas get the big ink dots
+        const v = mode === "paper" ? 1 - b : b;
+        if (v < 0.04) continue;
+
+        const r = v * maxR;
+        const reach = r + glowR * v;
+        let cr, cg, cb;
+        if (mode === "image") {
+          const boost = 0.6 + 0.9 * v;
+          cr = clamp255(src[si] * boost + 30 * v);
+          cg = clamp255(src[si + 1] * boost + 30 * v);
+          cb = clamp255(src[si + 2] * boost + 30 * v);
+        } else if (mode === "paper") {
+          cr = cg = cb = 16;
+        } else {
+          cr = cg = cb = 255;
+        }
+
+        const x0 = Math.max(0, Math.floor(cx - reach)), x1 = Math.min(w - 1, Math.ceil(cx + reach));
+        const y0 = Math.max(0, Math.floor(cy - reach)), y1 = Math.min(h - 1, Math.ceil(cy + reach));
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+            let a;
+            if (dist <= r) a = 1;
+            else if (dist <= reach) {
+              const t = (dist - r) / (reach - r || 1);
+              a = (1 - t) * (1 - t) * glow; // soft quadratic bloom
+            } else continue;
+            const di = (y * w + x) * 4;
+            if (mode === "paper") { // ink accumulates darker
+              d[di] = Math.min(d[di], 242 - (242 - cr) * a);
+              d[di + 1] = Math.min(d[di + 1], 242 - (242 - cg) * a);
+              d[di + 2] = Math.min(d[di + 2], 242 - (242 - cb) * a);
+            } else { // light accumulates additively
+              d[di] = clamp255(d[di] + cr * a);
+              d[di + 1] = clamp255(d[di + 1] + cg * a);
+              d[di + 2] = clamp255(d[di + 2] + cb * a);
+            }
+          }
+        }
+      }
+    }
+    return res;
+  }
+
+  // ======================================================================
   // PIXEL SORT — sort runs of pixels by brightness within a threshold band
   // ======================================================================
 
@@ -601,6 +749,36 @@ const Effects = (() => {
         { key: "amount", label: "dither strength", min: 0, max: 1.5, step: 0.05 },
         { key: "contrast", label: "contrast", min: 0.4, max: 2.5, step: 0.05 },
         { key: "brightness", label: "brightness", min: -100, max: 100, step: 1 },
+      ],
+    },
+    {
+      id: "linescreen",
+      name: "LINE SCREEN",
+      fn: lineScreen,
+      defaults: { direction: "horizontal", spacing: 8, thickness: 0.9, wave: 12, color: "image" },
+      params: [
+        { key: "direction", label: "direction", type: "select",
+          options: [["horizontal", "horizontal lines"], ["vertical", "vertical lines"]] },
+        { key: "spacing", label: "line spacing", min: 3, max: 40, step: 1, unit: "px" },
+        { key: "thickness", label: "thickness", min: 0.1, max: 1.5, step: 0.05 },
+        { key: "wave", label: "wave amount", min: 0, max: 40, step: 1, unit: "px" },
+        { key: "color", label: "color", type: "select",
+          options: [["image", "image colors"], ["mono", "white on black"], ["paper", "black on white"]] },
+      ],
+    },
+    {
+      id: "orbs",
+      name: "ORBS",
+      fn: orbHalftone,
+      defaults: { spacing: 14, size: 1, glow: 0.5, layout: "hex", color: "image" },
+      params: [
+        { key: "spacing", label: "orb spacing", min: 6, max: 48, step: 1, unit: "px" },
+        { key: "size", label: "orb size", min: 0.2, max: 1.6, step: 0.05 },
+        { key: "glow", label: "glow", min: 0, max: 1, step: 0.05 },
+        { key: "layout", label: "layout", type: "select",
+          options: [["hex", "hex grid"], ["square", "square grid"]] },
+        { key: "color", label: "color", type: "select",
+          options: [["image", "image colors"], ["mono", "white on black"], ["paper", "ink on paper"]] },
       ],
     },
     {
