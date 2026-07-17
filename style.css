@@ -34,14 +34,13 @@ code, kbd, .value, .res-label, select, .index-label {
 /* ---- header ---- */
 .site-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 1.1rem 2rem;
+  align-items: center;
+  padding: .65rem 1.2rem;
   border-bottom: 1px solid var(--ink);
 }
 .wordmark {
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: .9rem;
   letter-spacing: .22em;
   display: flex;
   align-items: center;
@@ -62,26 +61,6 @@ code, kbd, .value, .res-label, select, .index-label {
 .nav-item { font-size: .68rem; letter-spacing: .25em; }
 .muted { color: var(--muted); }
 
-/* ---- hero ---- */
-.hero {
-  padding: 4.5rem 2rem 3rem;
-  border-bottom: 1px solid var(--hairline);
-}
-.hero h1 {
-  font-size: clamp(2.4rem, 6vw, 4.6rem);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.02;
-  max-width: 18ch;
-}
-.hero-sub {
-  margin-top: 1.4rem;
-  color: var(--ink-2);
-  font-size: .95rem;
-  line-height: 1.6;
-  max-width: 52ch;
-}
-
 main { flex: 1; width: 100%; }
 
 .index-label {
@@ -94,7 +73,7 @@ main { flex: 1; width: 100%; }
 
 /* ---- dropzone ---- */
 .dropzone {
-  margin: 2.5rem 2rem;
+  margin: 1.4rem 1.2rem;
   border: 1px solid var(--ink);
   min-height: 320px;
   display: flex;
@@ -130,7 +109,7 @@ main { flex: 1; width: 100%; }
 }
 
 .canvas-panel {
-  padding: 1.6rem 2rem 2rem;
+  padding: 1.2rem 1.2rem 1.5rem;
   border-right: 1px solid var(--hairline);
   min-width: 0;
   position: sticky;      /* preview stays in view while scrolling the chain */
@@ -238,7 +217,7 @@ canvas {
 .btn-small { padding: .45em .9em; }
 
 /* ---- controls ---- */
-.controls { padding: 1.6rem 1.6rem 2.5rem; background: var(--panel); }
+.controls { padding: 1.2rem 1.2rem 2rem; background: var(--panel); }
 .controls-header {
   display: flex;
   align-items: flex-start;
@@ -493,11 +472,8 @@ select:focus { border-color: var(--ink); outline: none; }
 #sheet-content .effect { border-top: none; }
 
 @media (max-width: 940px) {
-  .site-header { padding: .8rem 1rem; }
-  .hero { padding: 1.6rem 1rem 1.2rem; }
-  .hero h1 { font-size: clamp(1.6rem, 7vw, 2.4rem); }
-  .hero-sub { font-size: .8rem; margin-top: .7rem; }
-  .dropzone { margin: 1.2rem 1rem; min-height: 240px; }
+  .site-header { padding: .55rem 1rem; }
+  .dropzone { margin: 1rem; min-height: 240px; }
   .controls { display: none; } /* editing happens via chips + sheet */
   .export-bar { margin-top: 1rem; padding-top: .9rem; }
   .canvas-actions { margin-top: .7rem; }
@@ -583,12 +559,10 @@ select:focus { border-color: var(--ink); outline: none; }
 /* ---- footer ---- */
 .site-footer {
   display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 1.1rem 2rem;
-  border-top: 1px solid var(--ink);
-  font-size: .66rem;
-  letter-spacing: .18em;
+  justify-content: center;
+  padding: .55rem 1.2rem;
+  border-top: 1px solid var(--hairline);
+  font-size: .58rem;
+  letter-spacing: .2em;
   text-transform: uppercase;
 }

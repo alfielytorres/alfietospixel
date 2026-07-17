@@ -17,30 +17,20 @@
 <body>
 <header class="site-header">
   <div class="wordmark"><img src="icons/versions-logo.png" alt="versions" class="wordmark-img"><span class="eye">◉</span>EYE</div>
-  <nav class="site-nav">
-    <span class="nav-item muted">PNG · SVG · MOV</span>
-  </nav>
 </header>
-
-<section class="hero">
-  <h1>Images and video,<br>re-versioned.</h1>
-  <p class="hero-sub">Drop a file, tap a look, make it yours — everything stays in your browser.</p>
-</section>
 
 <main>
   <section id="dropzone" class="dropzone">
     <input type="file" id="file-input" accept="image/*,video/*,.heic,.heif" hidden>
     <div class="dropzone-inner">
-      <div class="index-label">01 — SOURCE</div>
       <p class="drop-title">DROP AN IMAGE OR VIDEO</p>
-      <p class="hint">or click to browse · paste from clipboard<br>videos: 15 seconds max — the first 10 seconds are edited</p>
-      <button id="demo-btn" class="btn" type="button">USE DEMO PATTERN</button>
+      <p class="hint">click · drag · paste — video up to 15s</p>
+      <button id="demo-btn" class="btn" type="button">TRY THE DEMO</button>
     </div>
   </section>
 
   <section id="workspace" class="workspace" hidden>
     <div class="canvas-panel">
-      <div class="index-label">02 — CANVAS</div>
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas id="canvas"></canvas>
       </div>
@@ -57,7 +47,6 @@
         <button id="random-btn" class="btn" type="button">RANDOMIZE ALL</button>
       </div>
       <div class="export-bar">
-        <div class="index-label">03 — EXPORT</div>
         <div class="export-actions">
           <button id="download-btn" class="btn btn-primary" type="button">PNG ↓</button>
           <button id="svg-btn" class="btn btn-primary" type="button">SVG ↓</button>
@@ -76,23 +65,20 @@
 
     <aside class="controls" id="controls">
       <div class="controls-header">
-        <div class="index-label">02.1 — EFFECT CHAIN</div>
+        <div class="index-label">EFFECTS</div>
         <button id="reset-btn" class="btn btn-small" type="button">RESET</button>
       </div>
-      <p class="hint">Toggle effects on or off — they stack top to bottom.</p>
       <div id="effect-list"></div>
 
       <div class="controls-header overlays-header">
-        <div class="index-label">02.2 — OVERLAYS</div>
+        <div class="index-label">OVERLAYS</div>
       </div>
-      <p class="hint">ORBS and LINES cover the whole frame and distort around the image beneath them.</p>
       <div id="overlay-module-list"></div>
       <div id="star-section">
         <div class="controls-header star-header">
-          <div class="index-label">STARS</div>
+          <div class="index-label">STARS — drag on canvas</div>
           <button id="add-star-btn" class="btn btn-small" type="button">+ STAR</button>
         </div>
-        <p class="hint">Added one by one — <strong>drag them on the canvas</strong> to position them.</p>
         <div id="star-list"></div>
       </div>
     </aside>
@@ -117,7 +103,6 @@
 </div>
 
 <footer class="site-footer">
-  <span>versions<span class="eye">◉</span>eye</span>
   <span class="muted">files never leave your machine</span>
 </footer>
 
