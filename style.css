@@ -9,7 +9,7 @@
   --ink-2: #4c4b47;
   --muted: #8b8a84;
   --hairline: #d9d7d0;
-  --accent: #2b39ff;
+  --accent: #7c3aed;
   font-size: 15px;
 }
 
@@ -150,7 +150,7 @@ main { flex: 1; width: 100%; }
   left: 0; right: 0;
   height: 20%;
   top: -20%;
-  background: linear-gradient(to bottom, transparent, rgba(43, 57, 255, .18), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(124, 58, 237, .18), transparent);
   animation: sweep .7s ease-out .1s forwards;
   pointer-events: none;
 }
