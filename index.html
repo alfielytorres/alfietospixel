@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PIXELWRECK — glitch art generator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1 class="logo" data-text="PIXELWRECK">PIXELWRECK</h1>
+  <p class="tagline">drop an image · wreck it · download it</p>
+</header>
+
+<main>
+  <section id="dropzone" class="dropzone">
+    <input type="file" id="file-input" accept="image/*" hidden>
+    <div class="dropzone-inner">
+      <div class="dropzone-icon">▚▞</div>
+      <p><strong>Drop an image here</strong> or click to browse</p>
+      <p class="hint">or press <kbd>V</kbd> / paste from clipboard</p>
+      <button id="demo-btn" class="btn btn-ghost" type="button">no image? use demo pattern</button>
+    </div>
+  </section>
+
+  <section id="workspace" class="workspace" hidden>
+    <div class="canvas-panel">
+      <div class="canvas-wrap">
+        <canvas id="canvas"></canvas>
+      </div>
+      <div class="canvas-actions">
+        <button id="new-image-btn" class="btn btn-ghost" type="button">↩ new image</button>
+        <button id="original-btn" class="btn btn-ghost" type="button">👁 hold for original</button>
+        <button id="reroll-btn" class="btn" type="button">⟳ reroll seed</button>
+        <button id="random-btn" class="btn" type="button">🎲 randomize all</button>
+        <button id="download-btn" class="btn btn-primary" type="button">↓ download PNG</button>
+      </div>
+    </div>
+
+    <aside class="controls" id="controls">
+      <div class="controls-header">
+        <h2>EFFECT CHAIN</h2>
+        <button id="reset-btn" class="btn btn-ghost btn-small" type="button">reset all</button>
+      </div>
+      <p class="hint">toggle effects on/off — they stack top to bottom</p>
+      <div id="effect-list"></div>
+    </aside>
+  </section>
+</main>
+
+<footer>
+  <p>everything runs in your browser — images never leave your machine</p>
+</footer>
+
+<script src="effects.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
