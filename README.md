@@ -1,6 +1,6 @@
 # VERSIONS EYE — glitch studio
 
-Drop an image **or a video (first 10 seconds)** in, build an effect chain,
+Drop an image **or a video (max 15 s; the first 10 s are edited)** in, build an effect chain,
 export as **PNG, SVG or MOV**. Everything runs client-side in the browser
 (vanilla JS + canvas + WebCodecs) — no build step, no server, files never
 leave your machine.

@@ -6,6 +6,7 @@
   const MAX_DIM = 1600;        // cap for still images
   const MAX_VIDEO_DIM = 960;   // preview cap so per-frame effects stay realtime
   const MAX_CLIP_SECONDS = 10; // videos are trimmed to their first 10s
+  const MAX_FILE_SECONDS = 15; // videos longer than this are rejected outright
   const EXPORT_FPS = 30;
   const SVG_MAX_CELLS = 280;   // grid cap on the long edge for SVG export
 
@@ -230,10 +231,34 @@
           "to H.264 MP4 (on iPhone: Settings → Camera → Formats → Most Compatible)."
         : "This video format can't be decoded by your browser.");
     });
-    v.addEventListener("loadedmetadata", () => {
+    // Some recordings (e.g. MediaRecorder WebMs) report duration=Infinity at
+    // metadata time; seeking far past the end forces the real value.
+    const resolveDuration = () => new Promise((resolve) => {
+      if (isFinite(v.duration) && v.duration > 0) { resolve(v.duration); return; }
+      const finish = () => {
+        v.removeEventListener("seeked", finish);
+        v.currentTime = 0;
+        resolve(isFinite(v.duration) && v.duration > 0 ? v.duration : MAX_CLIP_SECONDS);
+      };
+      v.addEventListener("seeked", finish, { once: true });
+      setTimeout(finish, 3000);
+      v.currentTime = 1e7;
+    });
+
+    v.addEventListener("loadedmetadata", async () => {
       const w = v.videoWidth, h = v.videoHeight;
       if (!w || !h) { hideLoader(); cleanupVideo(); return; }
-      clipEnd = Math.min(v.duration || MAX_CLIP_SECONDS, MAX_CLIP_SECONDS);
+      const duration = await resolveDuration();
+      if (duration > MAX_FILE_SECONDS) {
+        hideLoader();
+        cleanupVideo();
+        $("workspace").hidden = true;
+        $("dropzone").hidden = false;
+        alert(`This video is ${Math.round(duration)}s long — the limit is ${MAX_FILE_SECONDS}s ` +
+          `(and only the first ${MAX_CLIP_SECONDS}s are edited). Trim it and try again.`);
+        return;
+      }
+      clipEnd = Math.min(duration, MAX_CLIP_SECONDS);
       const ratio = Math.min(1, MAX_VIDEO_DIM / Math.max(w, h));
       vidCanvas.width = Math.max(1, Math.round(w * ratio));
       vidCanvas.height = Math.max(1, Math.round(h * ratio));
