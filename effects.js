@@ -364,6 +364,81 @@ const Effects = (() => {
   }
 
   // ======================================================================
+  // ANAMORPHIC FLARE — horizontal lens streaks from highlights, optional
+  // vertical spikes so bright points become four-point stars
+  // ======================================================================
+
+  const FLARE_TINTS = {
+    "cool blue": [0.45, 0.68, 1.0],
+    "cyan":      [0.35, 1.0, 0.92],
+    "magenta":   [1.0, 0.4, 0.85],
+    "warm":      [1.0, 0.78, 0.45],
+    "white":     [1.0, 1.0, 1.0],
+  };
+
+  function anamorphicFlare(img, params) {
+    const w = img.width, h = img.height;
+    const res = clone(img);
+    const d = res.data;
+    const src = img.data;
+    const thr = params.threshold;
+    const tint = FLARE_TINTS[params.tint] || FLARE_TINTS["cool blue"];
+    const gain = params.gain * 255;
+
+    // highlight pass: how far above the threshold each pixel is (0..1)
+    const hl = new Float32Array(w * h);
+    const range = Math.max(1, 255 - thr);
+    for (let i = 0, p = 0; i < src.length; i += 4, p++) {
+      const l = luma(src, i);
+      if (l > thr) hl[p] = (l - thr) / range;
+    }
+
+    // streak = exponential-decay smear of the highlights, both directions.
+    // decay chosen so intensity falls to ~2% at `length` pixels.
+    const smear = (buf, lineLen, lineCount, idx, len) => {
+      const decay = Math.exp(-4 / Math.max(2, len));
+      for (let line = 0; line < lineCount; line++) {
+        let acc = 0;
+        for (let p = 0; p < lineLen; p++) {
+          const k = idx(line, p);
+          acc = acc * decay + hl[k];
+          if (acc > buf[k]) buf[k] = acc;
+        }
+        acc = 0;
+        for (let p = lineLen - 1; p >= 0; p--) {
+          const k = idx(line, p);
+          acc = acc * decay + hl[k];
+          if (acc > buf[k]) buf[k] = acc;
+        }
+      }
+    };
+
+    const streak = new Float32Array(w * h);
+    smear(streak, w, h, (y, x) => y * w + x, params.length);
+    if (params.spikes) {
+      // vertical spikes are shorter, giving the classic star cross
+      smear(streak, h, w, (x, y) => y * w + x, params.length * 0.3);
+    }
+
+    // soften vertically (3-tap) and composite additively with tint
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        let s = streak[p] * 0.6;
+        if (y > 0) s += streak[p - w] * 0.2;
+        if (y < h - 1) s += streak[p + w] * 0.2;
+        if (s <= 0.001) continue;
+        const i = p * 4;
+        const e = s * gain;
+        d[i] = clamp255(d[i] + e * tint[0]);
+        d[i + 1] = clamp255(d[i + 1] + e * tint[1]);
+        d[i + 2] = clamp255(d[i + 2] + e * tint[2]);
+      }
+    }
+    return res;
+  }
+
+  // ======================================================================
   // VHS / CRT — scanlines, chroma bleed, noise, jitter, vignette
   // ======================================================================
 
@@ -566,6 +641,21 @@ const Effects = (() => {
           options: [["horizontal", "horizontal"], ["vertical", "vertical"], ["both", "both"]] },
         { key: "amplitude", label: "amplitude", min: 0, max: 80, step: 1, unit: "px" },
         { key: "frequency", label: "frequency", min: 0.2, max: 20, step: 0.1 },
+      ],
+    },
+    {
+      id: "flare",
+      name: "ANAMORPHIC FLARE",
+      fn: anamorphicFlare,
+      defaults: { threshold: 205, length: 160, gain: 1.2, tint: "cool blue", spikes: true },
+      params: [
+        { key: "threshold", label: "highlight threshold", min: 100, max: 254, step: 1 },
+        { key: "length", label: "streak length", min: 10, max: 500, step: 5, unit: "px" },
+        { key: "gain", label: "gain", min: 0, max: 3, step: 0.05 },
+        { key: "tint", label: "tint", type: "select",
+          options: Object.keys(FLARE_TINTS).map((k) => [k, k]) },
+        { key: "spikes", label: "star spikes", type: "select",
+          options: [[true, "on — 4-point stars"], [false, "off — streaks only"]] },
       ],
     },
     {

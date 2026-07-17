@@ -3,22 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PIXELWRECK — glitch art generator</title>
+<title>ALFIETO'S PIXEL — glitch art generator</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <h1 class="logo" data-text="PIXELWRECK">PIXELWRECK</h1>
-  <p class="tagline">drop an image · wreck it · download it</p>
+  <h1 class="logo" data-text="ALFIETO'S PIXEL">ALFIETO'S PIXEL</h1>
+  <p class="tagline">drop an image or video · wreck it · download it</p>
 </header>
 
 <main>
   <section id="dropzone" class="dropzone">
-    <input type="file" id="file-input" accept="image/*" hidden>
+    <input type="file" id="file-input" accept="image/*,video/*" hidden>
     <div class="dropzone-inner">
       <div class="dropzone-icon">▚▞</div>
-      <p><strong>Drop an image here</strong> or click to browse</p>
-      <p class="hint">or press <kbd>V</kbd> / paste from clipboard</p>
+      <p><strong>Drop an image or video here</strong> or click to browse</p>
+      <p class="hint">videos: first 10 seconds are used · paste images from clipboard</p>
       <button id="demo-btn" class="btn btn-ghost" type="button">no image? use demo pattern</button>
     </div>
   </section>
@@ -29,11 +29,13 @@
         <canvas id="canvas"></canvas>
       </div>
       <div class="canvas-actions">
-        <button id="new-image-btn" class="btn btn-ghost" type="button">↩ new image</button>
+        <button id="new-image-btn" class="btn btn-ghost" type="button">↩ new file</button>
         <button id="original-btn" class="btn btn-ghost" type="button">👁 hold for original</button>
+        <button id="playpause-btn" class="btn" type="button" hidden>⏸ pause</button>
         <button id="reroll-btn" class="btn" type="button">⟳ reroll seed</button>
         <button id="random-btn" class="btn" type="button">🎲 randomize all</button>
         <button id="download-btn" class="btn btn-primary" type="button">↓ download PNG</button>
+        <button id="export-video-btn" class="btn btn-primary" type="button" hidden>⏺ export WebM</button>
       </div>
     </div>
 

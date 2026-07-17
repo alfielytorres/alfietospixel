@@ -1,57 +1,131 @@
-/* PIXELWRECK — UI wiring: load image, build controls, run pipeline, export. */
+/* ALFIETO'S PIXEL — UI wiring: load image/video, build controls,
+ * run the effect pipeline (live for video), export PNG or WebM. */
 "use strict";
 
 (() => {
-  const MAX_DIM = 1600; // cap working resolution so heavy effects stay snappy
+  const MAX_DIM = 1600;        // cap for still images
+  const MAX_VIDEO_DIM = 960;   // lower cap so per-frame effects stay realtime
+  const MAX_CLIP_SECONDS = 10; // videos are trimmed to their first 10s
+  const EXPORT_FPS = 30;
 
   const $ = (id) => document.getElementById(id);
   const canvas = $("canvas");
   const ctx = canvas.getContext("2d");
 
-  let sourceImage = null;   // ImageData of the loaded picture
+  let mode = "image";          // "image" | "video"
+  let sourceImage = null;      // ImageData for image mode
   let seed = (Math.random() * 0xffffffff) >>> 0;
   let renderQueued = false;
+  let holdOriginal = false;
+
+  // video state
+  let videoEl = null;
+  let videoUrl = null;
+  let vidRaf = 0;
+  let clipEnd = MAX_CLIP_SECONDS;
+  const vidCanvas = document.createElement("canvas");
+  const vctx = vidCanvas.getContext("2d", { willReadFrequently: true });
+
+  // recording state
+  let recorder = null;
+  let recording = false;
+  let recChunks = [];
 
   // ---- effect chain state, built from the registry ----
   const chain = {};
   for (const e of Effects.REGISTRY) {
     chain[e.id] = { enabled: false, params: { ...e.defaults } };
   }
-  // sensible starting look: dither on, like ditherboy's landing state
   chain.dither.enabled = true;
 
   // =====================================================================
-  // rendering
+  // rendering — image mode
   // =====================================================================
 
   function render() {
-    if (!sourceImage || renderQueued) return;
+    if (mode !== "image" || !sourceImage || renderQueued) return;
     renderQueued = true;
     requestAnimationFrame(() => {
       renderQueued = false;
-      const out = Effects.apply(sourceImage, chain, seed);
+      const out = holdOriginal ? sourceImage : Effects.apply(sourceImage, chain, seed);
       canvas.width = out.width;
       canvas.height = out.height;
       ctx.putImageData(out, 0, 0);
     });
   }
 
-  function showOriginal(show) {
-    if (!sourceImage) return;
-    if (show) {
-      canvas.width = sourceImage.width;
-      canvas.height = sourceImage.height;
-      ctx.putImageData(sourceImage, 0, 0);
-    } else {
-      render();
+  // =====================================================================
+  // rendering — video mode: live preview, every frame runs the chain
+  // =====================================================================
+
+  function frameSeed() {
+    // mix the frame index into the seed so glitches animate over time,
+    // but deterministically — preview and export show the same frames
+    const f = Math.floor((videoEl ? videoEl.currentTime : 0) * EXPORT_FPS);
+    return (seed ^ Math.imul(f + 1, 2654435761)) >>> 0;
+  }
+
+  function videoLoop() {
+    if (mode !== "video" || !videoEl) return;
+    const vw = vidCanvas.width, vh = vidCanvas.height;
+
+    if (videoEl.ended || videoEl.currentTime >= clipEnd) {
+      if (recording) stopRecorder();
+      videoEl.currentTime = 0;
+      if (videoEl.paused) videoEl.play().catch(() => {});
     }
+
+    vctx.drawImage(videoEl, 0, 0, vw, vh);
+    let frame = vctx.getImageData(0, 0, vw, vh);
+    if (!holdOriginal) frame = Effects.apply(frame, chain, frameSeed());
+    if (canvas.width !== vw) canvas.width = vw;
+    if (canvas.height !== vh) canvas.height = vh;
+    ctx.putImageData(frame, 0, 0);
+
+    if (recording) {
+      $("export-video-btn").textContent =
+        `⏺ ${videoEl.currentTime.toFixed(1)}s / ${clipEnd.toFixed(1)}s`;
+    }
+    vidRaf = requestAnimationFrame(videoLoop);
+  }
+
+  function showOriginal(show) {
+    holdOriginal = show;
+    render(); // video loop picks the flag up on its next frame
   }
 
   // =====================================================================
-  // image loading
+  // loading
   // =====================================================================
 
+  function enterWorkspace() {
+    $("dropzone").hidden = true;
+    $("workspace").hidden = false;
+    updateModeUI();
+  }
+
+  function updateModeUI() {
+    const isVideo = mode === "video";
+    $("playpause-btn").hidden = !isVideo;
+    $("export-video-btn").hidden = !isVideo;
+    $("download-btn").textContent = isVideo ? "↓ frame PNG" : "↓ download PNG";
+    $("playpause-btn").textContent = "⏸ pause";
+  }
+
+  function cleanupVideo() {
+    cancelAnimationFrame(vidRaf);
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    recording = false;
+    if (videoEl) videoEl.pause();
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    videoEl = null;
+    videoUrl = null;
+    $("export-video-btn").disabled = false;
+    $("export-video-btn").textContent = "⏺ export WebM";
+  }
+
   function loadFromImageElement(imgEl) {
+    cleanupVideo();
     let w = imgEl.naturalWidth || imgEl.width;
     let h = imgEl.naturalHeight || imgEl.height;
     if (!w || !h) return;
@@ -63,17 +137,44 @@
     const octx = off.getContext("2d");
     octx.drawImage(imgEl, 0, 0, w, h);
     sourceImage = octx.getImageData(0, 0, w, h);
-    $("dropzone").hidden = true;
-    $("workspace").hidden = false;
+    mode = "image";
+    enterWorkspace();
     render();
   }
 
+  function loadVideoFile(file) {
+    cleanupVideo();
+    videoUrl = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    v.addEventListener("loadedmetadata", () => {
+      const w = v.videoWidth, h = v.videoHeight;
+      if (!w || !h) { cleanupVideo(); return; }
+      clipEnd = Math.min(v.duration || MAX_CLIP_SECONDS, MAX_CLIP_SECONDS);
+      const ratio = Math.min(1, MAX_VIDEO_DIM / Math.max(w, h));
+      vidCanvas.width = Math.max(1, Math.round(w * ratio));
+      vidCanvas.height = Math.max(1, Math.round(h * ratio));
+      videoEl = v;
+      mode = "video";
+      enterWorkspace();
+      v.play().catch(() => {});
+      cancelAnimationFrame(vidRaf);
+      vidRaf = requestAnimationFrame(videoLoop);
+    }, { once: true });
+    v.src = videoUrl;
+  }
+
   function loadFile(file) {
-    if (!file || !file.type.startsWith("image/")) return;
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => { loadFromImageElement(img); URL.revokeObjectURL(url); };
-    img.src = url;
+    if (!file) return;
+    if (file.type.startsWith("video/")) loadVideoFile(file);
+    else if (file.type.startsWith("image/")) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { loadFromImageElement(img); URL.revokeObjectURL(url); };
+      img.src = url;
+    }
   }
 
   function loadDemo() {
@@ -109,11 +210,71 @@
       const y = h * 0.62 + Math.pow(i / 10, 1.8) * h * 0.38;
       c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke();
     }
+    // bright specular dots so the anamorphic flare has stars to catch
+    c.fillStyle = "#ffffff";
+    for (const [dx, dy, r] of [[0.18, 0.12, 3], [0.82, 0.2, 4], [0.65, 0.08, 2], [0.32, 0.3, 3]]) {
+      c.beginPath(); c.arc(w * dx, h * dy, r, 0, Math.PI * 2); c.fill();
+    }
     c.fillStyle = "#00ffc3";
-    c.font = "bold 54px monospace";
+    c.font = "bold 50px monospace";
     c.textAlign = "center";
-    c.fillText("PIXELWRECK", w / 2, h * 0.18);
+    c.fillText("ALFIETO'S PIXEL", w / 2, h * 0.18);
     loadFromImageElement(off);
+  }
+
+  // =====================================================================
+  // video export — record the live-previewed canvas with MediaRecorder
+  // =====================================================================
+
+  function pickMime() {
+    if (typeof MediaRecorder === "undefined") return null;
+    return ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
+      .find((m) => MediaRecorder.isTypeSupported(m)) || null;
+  }
+
+  function stopRecorder() {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }
+
+  function exportVideo() {
+    if (recording || mode !== "video" || !videoEl) return;
+    const mime = pickMime();
+    if (!mime) {
+      alert("This browser doesn't support MediaRecorder video export.");
+      return;
+    }
+    const btn = $("export-video-btn");
+    btn.disabled = true;
+    btn.textContent = "⏺ starting…";
+
+    const stream = canvas.captureStream(EXPORT_FPS);
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    recChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(recChunks, { type: recorder.mimeType || "video/webm" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `alfietos-pixel-${seed.toString(16)}.webm`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      recording = false;
+      btn.disabled = false;
+      btn.textContent = "⏺ export WebM";
+    };
+
+    // restart the clip so the export covers 0 → clipEnd, then record
+    const begin = () => {
+      videoEl.play().catch(() => {});
+      recorder.start(200);
+      recording = true;
+    };
+    if (videoEl.currentTime > 0.05) {
+      videoEl.addEventListener("seeked", begin, { once: true });
+      videoEl.currentTime = 0;
+    } else {
+      begin();
+    }
   }
 
   // =====================================================================
@@ -213,7 +374,6 @@
   }
 
   function syncControls() {
-    // rebuild is cheap and keeps DOM in step with chain state
     buildControls();
   }
 
@@ -239,11 +399,9 @@
         }
       }
     }
-    // always keep at least one effect on
     if (!Effects.REGISTRY.some((e) => chain[e.id].enabled)) {
       chain.slice.enabled = true;
     }
-    // huge pixel sizes eat the whole image — keep dither readable
     chain.dither.params.pixelSize = Math.min(chain.dither.params.pixelSize, 8);
     syncControls();
     render();
@@ -262,7 +420,7 @@
     canvas.toBlob((blob) => {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `pixelwreck-${seed.toString(16)}.png`;
+      a.download = `alfietos-pixel-${seed.toString(16)}.png`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     }, "image/png");
@@ -297,7 +455,7 @@
   });
   document.addEventListener("paste", (ev) => {
     for (const item of ev.clipboardData?.items || []) {
-      if (item.type.startsWith("image/")) {
+      if (item.type.startsWith("image/") || item.type.startsWith("video/")) {
         loadFile(item.getAsFile());
         return;
       }
@@ -311,10 +469,23 @@
   $("random-btn").addEventListener("click", randomizeAll);
   $("reset-btn").addEventListener("click", resetAll);
   $("download-btn").addEventListener("click", download);
+  $("export-video-btn").addEventListener("click", exportVideo);
   $("new-image-btn").addEventListener("click", () => {
+    cleanupVideo();
+    mode = "image";
     $("workspace").hidden = true;
     $("dropzone").hidden = false;
     $("file-input").value = "";
+  });
+  $("playpause-btn").addEventListener("click", () => {
+    if (!videoEl) return;
+    if (videoEl.paused) {
+      videoEl.play().catch(() => {});
+      $("playpause-btn").textContent = "⏸ pause";
+    } else {
+      videoEl.pause();
+      $("playpause-btn").textContent = "▶ play";
+    }
   });
 
   const origBtn = $("original-btn");
