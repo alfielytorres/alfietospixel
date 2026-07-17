@@ -47,10 +47,16 @@ code, kbd, .value, .res-label, select, .index-label {
   align-items: center;
 }
 .wordmark-img { height: 1.15em; display: block; }
-.wordmark .eye {
+.wordmark .eye, .site-footer .eye {
   color: var(--accent);
   margin: 0 .35em;
   font-size: .85em;
+  display: inline-block;
+  animation: blink 5s infinite;
+}
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(.1); }
 }
 .site-nav { display: flex; gap: 2rem; }
 .nav-item { font-size: .68rem; letter-spacing: .25em; }
@@ -151,7 +157,25 @@ main { flex: 1; width: 100%; }
   justify-content: center;
   min-height: 200px;
   overflow: hidden;
+  position: relative;
 }
+/* first-load reveal: soft pop + a scanline sweeping down once */
+.canvas-wrap.reveal canvas { animation: canvas-in .5s ease-out; }
+@keyframes canvas-in {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+.canvas-wrap.reveal::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  height: 20%;
+  top: -20%;
+  background: linear-gradient(to bottom, transparent, rgba(43, 57, 255, .18), transparent);
+  animation: sweep .7s ease-out .1s forwards;
+  pointer-events: none;
+}
+@keyframes sweep { to { top: 110%; } }
 canvas {
   max-width: 100%;
   max-height: 60vh;
@@ -382,6 +406,61 @@ select:focus { border-color: var(--ink); outline: none; }
 }
 .overlay-remove:hover { border-color: #cc2222; color: #cc2222; }
 .overlay-item .param { padding-left: 2rem; }
+
+/* ---- looks bar: one-tap curated presets ---- */
+.looks-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  margin-top: .9rem;
+}
+.looks-label { margin-bottom: 0; white-space: nowrap; }
+.looks-bar {
+  display: flex;
+  gap: .4rem;
+  overflow-x: auto;
+  padding: 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.looks-bar::-webkit-scrollbar { display: none; }
+.look {
+  flex: 0 0 auto;
+  font: 600 .62rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+  letter-spacing: .14em;
+  padding: .7em 1em;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .12s, color .12s, transform .06s;
+}
+.look:hover { background: var(--ink); color: var(--paper); }
+.look:active { transform: translateY(1px); }
+.look.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---- toast ---- */
+.toast {
+  position: fixed;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  padding: .8em 1.4em;
+  z-index: 90;
+  opacity: 0;
+  transition: opacity .3s;
+  pointer-events: none;
+  max-width: 90vw;
+  text-align: center;
+}
+.toast.show { opacity: 1; }
 
 /* ---- mobile chips + bottom sheet (VSCO-style) ---- */
 .chip-bar { display: none; }

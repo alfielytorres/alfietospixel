@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VERSIONS EYE — glitch studio</title>
+<title>VERSIONS EYE</title>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,14 +18,13 @@
 <header class="site-header">
   <div class="wordmark"><img src="icons/versions-logo.png" alt="versions" class="wordmark-img"><span class="eye">◉</span>EYE</div>
   <nav class="site-nav">
-    <span class="nav-item">GLITCH STUDIO</span>
-    <span class="nav-item muted">EST. 2026</span>
+    <span class="nav-item muted">PNG · SVG · MOV</span>
   </nav>
 </header>
 
 <section class="hero">
   <h1>Images and video,<br>re-versioned.</h1>
-  <p class="hero-sub">Drop a file. Build an effect chain. Export as PNG, SVG or MOV.<br>Everything runs in your browser — nothing is uploaded.</p>
+  <p class="hero-sub">Drop a file, tap a look, make it yours — everything stays in your browser.</p>
 </section>
 
 <main>
@@ -42,8 +41,12 @@
   <section id="workspace" class="workspace" hidden>
     <div class="canvas-panel">
       <div class="index-label">02 — CANVAS</div>
-      <div class="canvas-wrap">
+      <div class="canvas-wrap" id="canvas-wrap">
         <canvas id="canvas"></canvas>
+      </div>
+      <div class="looks-bar-wrap">
+        <div class="index-label looks-label">LOOKS</div>
+        <div id="looks-bar" class="looks-bar"></div>
       </div>
       <div id="chip-bar" class="chip-bar"></div>
       <div class="canvas-actions">
@@ -104,6 +107,8 @@
   <div id="sheet-content"></div>
 </div>
 
+<div id="toast" class="toast" hidden></div>
+
 <div id="loader" class="loader" hidden>
   <div class="loader-box">
     <div class="loader-bar"></div>
@@ -112,7 +117,7 @@
 </div>
 
 <footer class="site-footer">
-  <span>VERSIONS EYE — a client-side glitch studio</span>
+  <span>versions<span class="eye">◉</span>eye</span>
   <span class="muted">files never leave your machine</span>
 </footer>
 

@@ -134,6 +134,33 @@
     $("dropzone").hidden = true;
     $("workspace").hidden = false;
     updateModeUI();
+    // reveal animation: quick pop + scanline sweep over the fresh canvas
+    const wrap = $("canvas-wrap");
+    wrap.classList.remove("reveal");
+    void wrap.offsetWidth; // restart the animation
+    wrap.classList.add("reveal");
+    setTimeout(() => wrap.classList.remove("reveal"), 1000);
+    firstRunTip();
+  }
+
+  function toast(msg, ms) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.hidden = false;
+    requestAnimationFrame(() => t.classList.add("show"));
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => {
+      t.classList.remove("show");
+      setTimeout(() => { t.hidden = true; }, 350);
+    }, ms || 3200);
+  }
+
+  function firstRunTip() {
+    let seen = null;
+    try { seen = localStorage.getItem("versions-eye-tip"); } catch { /* private mode */ }
+    if (seen) return;
+    try { localStorage.setItem("versions-eye-tip", "1"); } catch { /* ignore */ }
+    setTimeout(() => toast("tap a look below · hold for original · reroll for a new glitch", 4200), 600);
   }
 
   function updateModeUI() {
@@ -1152,6 +1179,84 @@
   $("add-star-btn").addEventListener("click", addStar);
 
   // =====================================================================
+  // LOOKS — one-tap curated presets so the first upload lands somewhere
+  // beautiful immediately; everything stays tweakable afterwards
+  // =====================================================================
+
+  const LOOKS = {
+    "1-BIT":   (c) => { c.dither.enabled = true; Object.assign(c.dither.params, { algorithm: "bayer4", palette: "1-bit", pixelSize: 3 }); },
+    "PAPER":   (c) => { c.dither.enabled = true; Object.assign(c.dither.params, { algorithm: "atkinson", palette: "paper", pixelSize: 2, contrast: 1.1 }); },
+    "GAMEBOY": (c) => { c.dither.enabled = true; Object.assign(c.dither.params, { algorithm: "bayer4", palette: "gameboy", pixelSize: 4, contrast: 1.15 }); },
+    "VAPOR":   (c) => {
+      c.dither.enabled = true;
+      Object.assign(c.dither.params, { algorithm: "bayer8", palette: "vaporwave", pixelSize: 3 });
+      c.rgbshift.enabled = true;
+      Object.assign(c.rgbshift.params, { amount: 4, angle: 0 });
+    },
+    "THERMAL": (c) => { c.dither.enabled = true; Object.assign(c.dither.params, { algorithm: "floyd-serp", palette: "thermal", pixelSize: 2, contrast: 1.2 }); },
+    "VHS":     (c) => {
+      c.vhs.enabled = true;
+      c.rgbshift.enabled = true;
+      Object.assign(c.rgbshift.params, { amount: 3, angle: 0 });
+    },
+    "WRECK":   (c) => {
+      c.slice.enabled = true;
+      Object.assign(c.slice.params, { slices: 12, intensity: 0.6 });
+      c.blocks.enabled = true;
+      Object.assign(c.blocks.params, { blocks: 18 });
+      c.rgbshift.enabled = true;
+      Object.assign(c.rgbshift.params, { amount: 8, angle: 15 });
+    },
+    "GLOW":    (c, m) => {
+      c.posterburn.enabled = true;
+      Object.assign(c.posterburn.params, { levels: 7 });
+      m.orbs.enabled = true;
+      Object.assign(m.orbs.params, { spacing: 12, glow: 0.75, colorMode: "image" });
+    },
+    "CONTOUR": (c, m) => {
+      c.dither.enabled = true;
+      Object.assign(c.dither.params, { algorithm: "none", palette: "grayscale", pixelSize: 2, contrast: 1.25 });
+      m.lines.enabled = true;
+      Object.assign(m.lines.params, { direction: "horizontal", spacing: 7, wave: 16, glow: 0.6, colorMode: "image", intensity: 0.9 });
+    },
+  };
+
+  function applyLook(name) {
+    closeSheet(true);
+    for (const e of Effects.REGISTRY) {
+      chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
+    }
+    overlayModules.orbs = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) };
+    overlayModules.lines = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) };
+    LOOKS[name](chain, overlayModules);
+    syncControls();
+    buildOverlayModules();
+    updateChips();
+    document.querySelectorAll("#looks-bar .look").forEach((el) =>
+      el.classList.toggle("active", el.textContent === name));
+    render();
+  }
+
+  function buildLooks() {
+    const bar = $("looks-bar");
+    bar.innerHTML = "";
+    for (const name of Object.keys(LOOKS)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "look";
+      b.textContent = name;
+      b.addEventListener("click", () => applyLook(name));
+      bar.appendChild(b);
+    }
+  }
+  // manual edits clear the active-look highlight
+  document.addEventListener("change", (ev) => {
+    if (ev.target.closest && (ev.target.closest("#effect-list") || ev.target.closest("#overlay-module-list") || ev.target.closest("#sheet-content"))) {
+      document.querySelectorAll("#looks-bar .look.active").forEach((el) => el.classList.remove("active"));
+    }
+  });
+
+  // =====================================================================
   // mobile chips + bottom sheet (VSCO-style): the chip bar lists every
   // tool; tapping one lifts its existing control block into a bottom
   // sheet, so all editing happens under the sticky preview
@@ -1242,4 +1347,5 @@
   buildControls();
   buildOverlayList();
   buildChips();
+  buildLooks();
 })();
