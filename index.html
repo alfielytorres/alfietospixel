@@ -17,15 +17,20 @@
 <body>
 <header class="site-header">
   <div class="wordmark"><img src="icons/versions-logo.png" alt="versions" class="wordmark-img"><span class="eye">◉</span>EYE</div>
+  <button id="header-cta" class="btn btn-cta header-cta" type="button">start a project</button>
 </header>
 
 <main>
   <section id="dropzone" class="dropzone">
     <input type="file" id="file-input" accept="image/*,video/*,.heic,.heif" hidden>
     <div class="dropzone-inner">
+      <canvas id="wordmark-art" class="wordmark-art" aria-hidden="true"></canvas>
       <p class="drop-title">Drop an image<br>or video.</p>
-      <p class="hint">click · drag · paste — video up to 15s</p>
-      <button id="demo-btn" class="btn btn-cta" type="button">try the demo</button>
+      <p class="hint">click · drag · paste — video up to 15 seconds</p>
+      <div class="cta-row">
+        <button id="choose-btn" class="btn btn-cta" type="button">choose a file</button>
+        <button id="demo-btn" class="btn btn-cta btn-cta-lav" type="button">try the demo</button>
+      </div>
     </div>
   </section>
 

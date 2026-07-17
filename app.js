@@ -1350,6 +1350,57 @@
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
 
+  // ---- landing wordmark art: the brand word rendered as a field of
+  // purple stars, sampled from real text like the versions site hero ----
+  function drawWordmarkArt() {
+    const el = $("wordmark-art");
+    if (!el) return;
+    const cssW = Math.min(el.parentElement.clientWidth * 0.92 || 640, 640);
+    if (cssW < 100) return;
+    const scale = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.round(cssW * scale);
+    const h = Math.round(w * 0.24);
+
+    // sample mask: the word drawn as bold text
+    const off = document.createElement("canvas");
+    off.width = w; off.height = h;
+    const g = off.getContext("2d");
+    g.font = `800 ${Math.round(h * 0.82)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("versions", w / 2, h * 0.56);
+    const mask = g.getImageData(0, 0, w, h).data;
+
+    el.width = w; el.height = h;
+    el.style.height = `${Math.round(cssW * 0.24)}px`;
+    const c = el.getContext("2d");
+    const rng = Effects.makeRng(20260717);
+    const glyphs = ["✳", "✱", "＊", "*", "+", "~"];
+    const purples = ["#8a5bc9", "#7451d2", "#5b52c9", "#9a5fc2", "#4c4fc0", "#6d4fd8"];
+    const step = Math.max(3, Math.round(w / 130));
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    for (let y = step / 2; y < h; y += step) {
+      for (let x = step / 2; x < w; x += step) {
+        const i = ((Math.round(y) * w) + Math.round(x)) * 4;
+        if (mask[i + 3] < 80 || rng() < 0.06) continue;
+        c.fillStyle = purples[Math.floor(rng() * purples.length)];
+        c.font = `${step * (1.1 + rng() * 1.2)}px serif`;
+        c.fillText(glyphs[Math.floor(rng() * glyphs.length)],
+          x + (rng() - 0.5) * step * 0.7, y + (rng() - 0.5) * step * 0.7);
+      }
+    }
+  }
+  drawWordmarkArt();
+  let artResizeT = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(artResizeT);
+    artResizeT = setTimeout(drawWordmarkArt, 200);
+  });
+
+  // header CTA + explicit chooser both open the file picker
+  $("header-cta").addEventListener("click", () => $("file-input").click());
+
   // mobile app bar proxies the main actions
   $("ab-new").addEventListener("click", () => $("new-image-btn").click());
   $("ab-seed").addEventListener("click", () => $("reroll-btn").click());
