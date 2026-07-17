@@ -22,7 +22,7 @@
 
 <main>
   <section id="dropzone" class="dropzone">
-    <input type="file" id="file-input" accept="image/*,video/*" hidden>
+    <input type="file" id="file-input" accept="image/*,video/*,.heic,.heif" hidden>
     <div class="dropzone-inner">
       <div class="index-label">01 — SOURCE</div>
       <p class="drop-title">DROP AN IMAGE OR VIDEO</p>
@@ -52,9 +52,9 @@
           <span id="res-wrap" class="res-wrap" hidden>
             <label for="export-res" class="res-label">RES</label>
             <select id="export-res">
-              <option value="1080">1080p</option>
-              <option value="2160">4K</option>
-              <option value="preview">preview (fast)</option>
+              <option value="1080">1080p — matches preview</option>
+              <option value="2160">4K — matches preview</option>
+              <option value="preview">preview size (fast)</option>
             </select>
           </span>
           <button id="export-video-btn" class="btn btn-primary" type="button" hidden>MOV ↓</button>

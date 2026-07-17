@@ -48,9 +48,10 @@ paper, Game Boy, CGA, flareware, vaporwave, thermal, grayscale.
   row, and emitted as one `<path>` per color. Best with dither enabled
   and a small palette; scales to any size with crisp pixel edges.
 - **MOV (video)** — offline render: every frame of the 10-second clip is
-  seeked, run through the effect chain at full export resolution
-  (**1080p or 4K**), and encoded via WebCodecs (H.264) into an
-  MP4/QuickTime container muxed by the vendored
+  seeked, run through the effect chain **at preview resolution — so the
+  export looks exactly like the live preview** — then upscaled to
+  **1080p or 4K** with hard nearest-neighbor pixels and encoded via
+  WebCodecs (H.264) into an MP4/QuickTime container muxed by the vendored
   [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) (MIT). Because
   encoding is offline with exact 30 fps timestamps, output is smooth even
   when effects run slower than realtime — no dropped frames. Click the
@@ -83,6 +84,25 @@ and diffuses it to unprocessed neighbors:
 Serpentine mode alternates scan direction each row (mirroring the kernel)
 to break up directional worm artifacts. Ordered modes use Bayer threshold
 matrices; Atkinson diffuses 6/8 of the error for a brighter look.
+
+## iPhone files
+
+- **HEIC photos** work everywhere: Safari decodes them natively, and other
+  browsers fall back to the vendored [libheif](https://github.com/strukturag/libheif)
+  WASM decoder (lazy-loaded only when a HEIC file arrives). Files with a
+  missing/odd MIME type are sniffed by extension too.
+- **HEVC (H.265) videos** decode wherever the browser/hardware supports
+  them (Safari, most modern devices). Where they can't, the app now shows
+  a clear explanation (with the iPhone "Most Compatible" camera setting
+  tip) instead of a silent black canvas.
+
+## Phones
+
+On iPhone and Android, exports open the **native share sheet** (Web Share
+API) instead of a plain download, so results can go straight to Photos,
+AirDrop, or socials. If the share prompt can't fire after a long render
+(the tap "expired"), the button switches to **TAP TO SHARE** — one more
+tap opens the sheet. Desktop browsers keep normal downloads.
 
 ## Extras
 

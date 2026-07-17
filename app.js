@@ -69,6 +69,10 @@
 
   function videoLoop() {
     if (mode !== "video" || !videoEl || exporting) return;
+    if (videoEl.readyState < 2) { // no decoded frame yet — don't draw black
+      vidRaf = requestAnimationFrame(videoLoop);
+      return;
+    }
     const vw = vidCanvas.width, vh = vidCanvas.height;
 
     if (videoEl.ended || videoEl.currentTime >= clipEnd) {
@@ -148,6 +152,51 @@
     render();
   }
 
+  // ---- HEIC (iPhone photos): Safari decodes natively; everywhere else we
+  // lazy-load the vendored libheif wasm decoder (only fetched when needed) ----
+  let heifModPromise = null;
+  function heifModule() {
+    if (!heifModPromise) {
+      heifModPromise = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "vendor/libheif-bundle.js";
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error("failed to load HEIC decoder"));
+        document.head.appendChild(s);
+      }).then(() => (typeof libheif === "function" ? libheif() : libheif));
+    }
+    return heifModPromise;
+  }
+
+  async function loadHeicFile(file) {
+    try { // native decode first (Safari, some Android)
+      const bmp = await createImageBitmap(file);
+      loadFromImageElement(bmp);
+      return;
+    } catch { /* fall through to wasm decoder */ }
+    try {
+      const mod = await heifModule();
+      const decoder = new mod.HeifDecoder();
+      const images = decoder.decode(await file.arrayBuffer());
+      if (!images || !images.length) throw new Error("no image found in HEIC");
+      const image = images[0];
+      const w = image.get_width(), h = image.get_height();
+      const off = document.createElement("canvas");
+      off.width = w; off.height = h;
+      const octx = off.getContext("2d");
+      const id = octx.createImageData(w, h);
+      await new Promise((resolve, reject) => {
+        image.display(id, (ok) => (ok ? resolve() : reject(new Error("HEIC decode failed"))));
+      });
+      octx.putImageData(id, 0, 0);
+      for (const im of images) { try { im.free(); } catch { /* best effort */ } }
+      loadFromImageElement(off);
+    } catch (e) {
+      console.error(e);
+      alert("Couldn't decode this HEIC image in this browser. Try converting it to JPEG/PNG.");
+    }
+  }
+
   function loadVideoFile(file) {
     cleanupVideo();
     videoUrl = URL.createObjectURL(file);
@@ -155,6 +204,17 @@
     v.muted = true;
     v.playsInline = true;
     v.preload = "auto";
+    const looksApple = /quicktime|\.mov$|\.m4v$/i.test(file.type + " " + (file.name || ""));
+    v.addEventListener("error", () => {
+      cleanupVideo();
+      $("workspace").hidden = true;
+      $("dropzone").hidden = false;
+      alert(looksApple
+        ? "This video can't be decoded by your browser. iPhone videos are often HEVC (H.265), " +
+          "which needs Safari or a device with hardware HEVC support — or re-export/convert it " +
+          "to H.264 MP4 (on iPhone: Settings → Camera → Formats → Most Compatible)."
+        : "This video format can't be decoded by your browser.");
+    });
     v.addEventListener("loadedmetadata", () => {
       const w = v.videoWidth, h = v.videoHeight;
       if (!w || !h) { cleanupVideo(); return; }
@@ -175,13 +235,26 @@
 
   function loadFile(file) {
     if (!file) return;
-    if (file.type.startsWith("video/")) loadVideoFile(file);
-    else if (file.type.startsWith("image/")) {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => { loadFromImageElement(img); URL.revokeObjectURL(url); };
-      img.src = url;
-    }
+    const name = (file.name || "").toLowerCase();
+    // some platforms hand over HEIC (or files from the share sheet) with an
+    // empty/odd MIME type, so sniff the extension too
+    const isHeif = /image\/hei[cf]/.test(file.type) || /\.(heic|heif|hif)$/.test(name);
+    const isVideo = file.type.startsWith("video/") ||
+      (!file.type && /\.(mov|mp4|m4v|webm|mkv)$/.test(name));
+    const isImage = file.type.startsWith("image/") ||
+      (!file.type && /\.(png|jpe?g|gif|webp|bmp|avif)$/.test(name));
+    if (isHeif) { loadHeicFile(file); return; }
+    if (isVideo) { loadVideoFile(file); return; }
+    if (!isImage) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { loadFromImageElement(img); URL.revokeObjectURL(url); };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // HEIC files sometimes arrive typed as plain image/* — try the decoder
+      loadHeicFile(file);
+    };
+    img.src = url;
   }
 
   function loadDemo() {
@@ -233,7 +306,7 @@
   // downloads
   // =====================================================================
 
-  function saveBlob(blob, filename) {
+  function anchorDownload(blob, filename) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = filename;
@@ -241,8 +314,43 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
+  function isMobile() {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (matchMedia("(pointer: coarse)").matches && navigator.maxTouchPoints > 0);
+  }
+
+  let pendingShare = null; // File waiting for a fresh tap (share needs a user gesture)
+
+  function armShareButton(file) {
+    pendingShare = file;
+    const btn = $("export-video-btn");
+    btn.disabled = false;
+    btn.textContent = "TAP TO SHARE";
+  }
+
+  // On phones, hand files to the native iOS/Android share sheet so they can
+  // go straight to Photos, AirDrop, socials etc.; desktop keeps downloads.
+  async function deliverFile(blob, filename) {
+    const file = new File([blob], filename, { type: blob.type || "application/octet-stream" });
+    if (isMobile() && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // user closed the sheet
+        if (e && e.name === "NotAllowedError") {
+          // gesture expired (e.g. after a long render) — ask for one tap
+          armShareButton(file);
+          return;
+        }
+        // anything else: fall through to a plain download
+      }
+    }
+    anchorDownload(blob, filename);
+  }
+
   function downloadPng() {
-    canvas.toBlob((blob) => saveBlob(blob, `versions-eye-${seed.toString(16)}.png`), "image/png");
+    canvas.toBlob((blob) => deliverFile(blob, `versions-eye-${seed.toString(16)}.png`), "image/png");
   }
 
   // ---- SVG export: sample the canvas on a coarse grid, RLE runs per row,
@@ -301,7 +409,7 @@
     }
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${gw} ${gh}" ` +
       `width="${gw * cell}" height="${gh * cell}" shape-rendering="crispEdges">${body}</svg>`;
-    saveBlob(new Blob([svg], { type: "image/svg+xml" }), `versions-eye-${seed.toString(16)}.svg`);
+    deliverFile(new Blob([svg], { type: "image/svg+xml" }), `versions-eye-${seed.toString(16)}.svg`);
   }
 
   // =====================================================================
@@ -339,7 +447,12 @@
   }
 
   async function offlineRender(targetShort) {
-    const aspect = vidCanvas.width / vidCanvas.height;
+    // Frames are processed at PREVIEW resolution so the export looks
+    // exactly like what you dialed in (effect params are in pixels —
+    // running the chain natively at 1080p/4K changes the look), then
+    // upscaled to the target size with hard nearest-neighbor pixels.
+    const pw = vidCanvas.width, ph = vidCanvas.height;
+    const aspect = pw / ph;
     let ew, eh;
     if (aspect >= 1) { eh = targetShort; ew = Math.round(targetShort * aspect); }
     else { ew = targetShort; eh = Math.round(targetShort / aspect); }
@@ -366,9 +479,14 @@
     });
     encoder.configure({ codec: cfg.codec, width: ew, height: eh, bitrate: cfg.bitrate, framerate: EXPORT_FPS });
 
+    // processing canvas at preview size; export canvas at target size
+    const pcan = document.createElement("canvas");
+    pcan.width = pw; pcan.height = ph;
+    const pctx = pcan.getContext("2d", { willReadFrequently: true });
     const ecan = document.createElement("canvas");
     ecan.width = ew; ecan.height = eh;
-    const ectx = ecan.getContext("2d", { willReadFrequently: true });
+    const ectx = ecan.getContext("2d");
+    ectx.imageSmoothingEnabled = false;
 
     const totalFrames = Math.max(1, Math.round(clipEnd * EXPORT_FPS));
     let ok = true;
@@ -376,12 +494,13 @@
       for (let i = 0; i < totalFrames; i++) {
         if (cancelExport || encoderError) { ok = false; break; }
         await seekTo(i / EXPORT_FPS);
-        ectx.drawImage(videoEl, 0, 0, ew, eh);
-        let frame = ectx.getImageData(0, 0, ew, eh);
+        pctx.drawImage(videoEl, 0, 0, pw, ph);
+        let frame = pctx.getImageData(0, 0, pw, ph);
         frame = Effects.apply(frame, chain, frameSeedAt(i));
-        ectx.putImageData(frame, 0, 0);
-        // mirror progress on the visible canvas
-        if (canvas.width !== ew) { canvas.width = ew; canvas.height = eh; }
+        pctx.putImageData(frame, 0, 0);
+        ectx.drawImage(pcan, 0, 0, ew, eh); // crisp nearest-neighbor upscale
+        // mirror progress on the visible canvas at preview size
+        if (canvas.width !== pw) { canvas.width = pw; canvas.height = ph; }
         ctx.putImageData(frame, 0, 0);
 
         const vf = new VideoFrame(ecan, { timestamp: i * 1e6 / EXPORT_FPS, duration: 1e6 / EXPORT_FPS });
@@ -393,7 +512,7 @@
       if (ok) {
         await encoder.flush();
         muxer.finalize();
-        saveBlob(new Blob([muxer.target.buffer], { type: cfg.mime }),
+        deliverFile(new Blob([muxer.target.buffer], { type: cfg.mime }),
           `versions-eye-${seed.toString(16)}.${cfg.ext}`);
       }
     } catch (e) {
@@ -437,7 +556,7 @@
     recChunks = [];
     recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
     recorder.onstop = () => {
-      saveBlob(new Blob(recChunks, { type: recorder.mimeType || mime }),
+      deliverFile(new Blob(recChunks, { type: recorder.mimeType || mime }),
         `versions-eye-${seed.toString(16)}.${ext}`);
       recording = false;
       btn.disabled = false;
@@ -461,6 +580,15 @@
   }
 
   async function exportVideo() {
+    if (pendingShare) { // a finished export is waiting for this fresh tap
+      const f = pendingShare;
+      pendingShare = null;
+      $("export-video-btn").textContent = "MOV ↓";
+      navigator.share({ files: [f], title: f.name }).catch((e) => {
+        if (!e || e.name !== "AbortError") anchorDownload(f, f.name);
+      });
+      return;
+    }
     if (mode !== "video" || !videoEl || recording) return;
     if (exporting) { cancelExport = true; return; } // second click cancels
     const res = $("export-res").value;
