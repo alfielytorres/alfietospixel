@@ -33,16 +33,19 @@ Effects toggle on/off and stack top-to-bottom:
 
 ### Overlays (02.2)
 
-On top of the filter chain there's a separate **OVERLAYS** group — elements
-composited over the image, each one **draggable directly on the canvas**:
+A separate **OVERLAYS** group sits on top of the filter chain output:
 
-- **STAR** — anamorphic lens star: horizontal streak, adjustable vertical
-  spike, thickness, intensity, any color.
-- **ORB** — glowing bokeh orb with core size, glow falloff, intensity, color.
-- **LINES** — scan-line screen with direction (horizontal/vertical), spacing,
-  thickness, opacity, color, an optional ripple that bends lines around the
-  image beneath, and a **balance** control: balanced, heavier left/top, or
-  heavier right/bottom (skewed). Dragging shifts the pattern's phase.
+- **ORBS** — a full-frame module (toggle on/off like a filter): a hex or
+  square grid of glowing orbs that **distort around the image** — brighter
+  areas grow bigger, hotter orbs. Glow slider, intensity, and color mode:
+  the image's own colors or a custom picked color (widget + hex).
+- **LINES** — full-frame scan lines that **bend around the brightness of
+  the image beneath** (distort-by-image slider), with a glow skirt,
+  direction, spacing, thickness, opacity, color mode (image / custom), and
+  **balance**: balanced, heavier left/top, or heavier right/bottom (skewed).
+- **STAR** — added one by one with **+ STAR**, each an anamorphic lens
+  star (streak + vertical spike + core) with its own color, and
+  **draggable directly on the canvas**.
 
 Overlays render in image mode, live video preview, and all exports.
 

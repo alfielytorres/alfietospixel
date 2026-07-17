@@ -42,8 +42,13 @@
   }
   chain.dither.enabled = true;
 
-  // ---- overlays: stars / orbs / line screens on top of the image ----
-  let overlays = [];
+  // ---- overlays: ORBS/LINES are full-frame modules that react to the
+  // image; STARs are individual draggable sprites ----
+  const overlayModules = {
+    orbs: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) },
+    lines: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) },
+  };
+  let stars = [];
   let dragIdx = -1;
 
   // =====================================================================
@@ -58,7 +63,7 @@
       let out = sourceImage;
       if (!holdOriginal) {
         out = Effects.apply(sourceImage, chain, seed);
-        out = Effects.renderOverlays(out, overlays);
+        out = Effects.renderOverlayStack(out, overlayModules, stars);
       }
       canvas.width = out.width;
       canvas.height = out.height;
@@ -95,7 +100,7 @@
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
       frame = Effects.apply(frame, chain, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)));
-      frame = Effects.renderOverlays(frame, overlays);
+      frame = Effects.renderOverlayStack(frame, overlayModules, stars);
     }
     if (canvas.width !== vw) canvas.width = vw;
     if (canvas.height !== vh) canvas.height = vh;
@@ -227,6 +232,10 @@
     const v = document.createElement("video");
     v.muted = true;
     v.playsInline = true;
+    // iOS Safari needs the attributes (not just properties) + explicit load()
+    v.setAttribute("muted", "");
+    v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
     v.preload = "auto";
     const looksApple = /quicktime|\.mov$|\.m4v$/i.test(file.type + " " + (file.name || ""));
     v.addEventListener("error", () => {
@@ -268,18 +277,24 @@
         return;
       }
       clipEnd = Math.min(duration, MAX_CLIP_SECONDS);
-      const ratio = Math.min(1, MAX_VIDEO_DIM / Math.max(w, h));
+      // phones get a lower preview cap so per-frame JS effects stay smooth
+      const dimCap = isMobile() ? 640 : MAX_VIDEO_DIM;
+      const ratio = Math.min(1, dimCap / Math.max(w, h));
       vidCanvas.width = Math.max(1, Math.round(w * ratio));
       vidCanvas.height = Math.max(1, Math.round(h * ratio));
       videoEl = v;
       mode = "video";
       cancelExport = false;
       enterWorkspace();
-      v.play().catch(() => {});
+      v.play().catch(() => {
+        // autoplay refused (e.g. iOS Low Power Mode) — surface the play button
+        $("playpause-btn").textContent = "PLAY";
+      });
       cancelAnimationFrame(vidRaf);
       vidRaf = requestAnimationFrame(videoLoop);
     }, { once: true });
     v.src = videoUrl;
+    v.load(); // iOS Safari won't fire loadedmetadata for blob URLs without this
   }
 
   function loadFile(file) {
@@ -548,7 +563,7 @@
         pctx.drawImage(videoEl, 0, 0, pw, ph);
         let frame = pctx.getImageData(0, 0, pw, ph);
         frame = Effects.apply(frame, chain, frameSeedAt(i));
-        frame = Effects.renderOverlays(frame, overlays);
+        frame = Effects.renderOverlayStack(frame, overlayModules, stars);
         pctx.putImageData(frame, 0, 0);
         ectx.drawImage(pcan, 0, 0, ew, eh); // crisp nearest-neighbor upscale
         // mirror progress on the visible canvas at preview size
@@ -812,82 +827,156 @@
   // overlays UI + canvas dragging
   // =====================================================================
 
-  function addOverlay(type) {
-    const def = Effects.OVERLAY_TYPES[type];
-    overlays.push({ type, ...structuredClone(def.defaults) });
+  function addStar() {
+    stars.push(structuredClone(Effects.STAR_TYPE.defaults));
     buildOverlayList();
     render();
+  }
+
+  function buildParamRow(p, get, set) {
+    const row = document.createElement("div");
+    row.className = "param";
+    const label = document.createElement("div");
+    label.className = "param-label";
+    const nameEl = document.createElement("span");
+    nameEl.textContent = p.label;
+    const valEl = document.createElement("span");
+    valEl.className = "value";
+    label.append(nameEl, valEl);
+    row.appendChild(label);
+
+    if (p.type === "select") {
+      const sel = document.createElement("select");
+      for (const [val, text] of p.options) {
+        const opt = document.createElement("option");
+        opt.value = String(val);
+        opt.textContent = text;
+        sel.appendChild(opt);
+      }
+      sel.value = String(get());
+      sel.addEventListener("change", () => { set(sel.value); render(); });
+      row.appendChild(sel);
+      valEl.remove();
+    } else if (p.type === "color") {
+      const item = document.createElement("div");
+      item.className = "color-item";
+      const cIn = document.createElement("input");
+      cIn.type = "color";
+      cIn.value = get();
+      const tIn = document.createElement("input");
+      tIn.type = "text";
+      tIn.maxLength = 7;
+      tIn.value = get();
+      cIn.addEventListener("input", () => {
+        set(cIn.value); tIn.value = cIn.value;
+        tIn.classList.remove("invalid");
+        render();
+      });
+      tIn.addEventListener("input", () => {
+        const m = HEX_RE.exec(tIn.value.trim());
+        if (m) {
+          const v = "#" + m[1].toLowerCase();
+          set(v); cIn.value = v;
+          tIn.classList.remove("invalid");
+          render();
+        } else tIn.classList.add("invalid");
+      });
+      item.append(cIn, tIn);
+      row.appendChild(item);
+      valEl.remove();
+    } else {
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = p.min; slider.max = p.max; slider.step = p.step;
+      slider.value = get();
+      valEl.textContent = fmt(get(), p);
+      slider.addEventListener("input", () => {
+        set(parseFloat(slider.value));
+        valEl.textContent = fmt(get(), p);
+        render();
+      });
+      row.appendChild(slider);
+    }
+    return row;
   }
 
   function buildOverlayList() {
     const list = $("overlay-list");
     list.innerHTML = "";
-    overlays.forEach((o, idx) => {
-      const t = Effects.OVERLAY_TYPES[o.type];
+
+    // --- ORBS / LINES modules: one toggleable block each, like filters ---
+    for (const key of ["orbs", "lines"]) {
+      const def = Effects.OVERLAY_MODULES[key];
+      const state = overlayModules[key];
+      const box = document.createElement("div");
+      box.className = "effect" + (state.enabled ? " enabled open" : "");
+      box.dataset.overlayModule = key;
+
+      const head = document.createElement("div");
+      head.className = "effect-head";
+      const toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.className = "effect-toggle";
+      toggle.checked = state.enabled;
+      toggle.setAttribute("aria-label", `enable ${def.name} overlay`);
+      const name = document.createElement("span");
+      name.className = "effect-name";
+      name.textContent = def.name;
+      const caret = document.createElement("span");
+      caret.className = "effect-caret";
+      caret.textContent = "▶";
+      head.append(toggle, name, caret);
+
+      const body = document.createElement("div");
+      body.className = "effect-body";
+      for (const p of def.params) {
+        body.appendChild(buildParamRow(p,
+          () => state.params[p.key],
+          (v) => { state.params[p.key] = v; }));
+      }
+
+      toggle.addEventListener("change", () => {
+        state.enabled = toggle.checked;
+        box.classList.toggle("enabled", state.enabled);
+        if (state.enabled) box.classList.add("open");
+        render();
+      });
+      head.addEventListener("click", (ev) => {
+        if (ev.target === toggle) return;
+        box.classList.toggle("open");
+      });
+      box.append(head, body);
+      list.appendChild(box);
+    }
+
+    // --- STAR instances: added one by one, draggable on the canvas ---
+    stars.forEach((o, idx) => {
       const item = document.createElement("div");
       item.className = "overlay-item";
-
       const head = document.createElement("div");
       head.className = "overlay-head";
       const name = document.createElement("span");
       name.className = "overlay-name";
-      name.textContent = `${t.name} ${idx + 1}`;
+      name.textContent = `STAR ${idx + 1}`;
       const colorIn = document.createElement("input");
       colorIn.type = "color";
       colorIn.value = o.color;
-      colorIn.setAttribute("aria-label", `${t.name} ${idx + 1} color`);
+      colorIn.setAttribute("aria-label", `star ${idx + 1} color`);
       colorIn.addEventListener("input", () => { o.color = colorIn.value; render(); });
       const rm = document.createElement("button");
       rm.className = "overlay-remove";
       rm.type = "button";
       rm.textContent = "×";
-      rm.setAttribute("aria-label", `remove ${t.name} ${idx + 1}`);
+      rm.setAttribute("aria-label", `remove star ${idx + 1}`);
       rm.addEventListener("click", () => {
-        overlays.splice(idx, 1);
+        stars.splice(idx, 1);
         buildOverlayList();
         render();
       });
       head.append(name, colorIn, rm);
       item.appendChild(head);
-
-      for (const p of t.params) {
-        const row = document.createElement("div");
-        row.className = "param";
-        const label = document.createElement("div");
-        label.className = "param-label";
-        const nameEl = document.createElement("span");
-        nameEl.textContent = p.label;
-        const valEl = document.createElement("span");
-        valEl.className = "value";
-        label.append(nameEl, valEl);
-        row.appendChild(label);
-
-        if (p.type === "select") {
-          const sel = document.createElement("select");
-          for (const [val, text] of p.options) {
-            const opt = document.createElement("option");
-            opt.value = String(val);
-            opt.textContent = text;
-            sel.appendChild(opt);
-          }
-          sel.value = String(o[p.key]);
-          sel.addEventListener("change", () => { o[p.key] = sel.value; render(); });
-          row.appendChild(sel);
-          valEl.remove();
-        } else {
-          const slider = document.createElement("input");
-          slider.type = "range";
-          slider.min = p.min; slider.max = p.max; slider.step = p.step;
-          slider.value = o[p.key];
-          valEl.textContent = fmt(o[p.key], p);
-          slider.addEventListener("input", () => {
-            o[p.key] = parseFloat(slider.value);
-            valEl.textContent = fmt(o[p.key], p);
-            render();
-          });
-          row.appendChild(slider);
-        }
-        item.appendChild(row);
+      for (const p of Effects.STAR_TYPE.params) {
+        item.appendChild(buildParamRow(p, () => o[p.key], (v) => { o[p.key] = v; }));
       }
       list.appendChild(item);
     });
@@ -901,39 +990,28 @@
     };
   }
 
-  function pickOverlay(p) {
-    // nearest star/orb within its own footprint wins; else the topmost
-    // LINES overlay (its pattern is dragged by phase, so anywhere grabs it)
+  canvas.addEventListener("pointerdown", (ev) => {
+    if (!stars.length) return;
+    const p = canvasPoint(ev);
     let best = -1, bestD = Infinity;
-    overlays.forEach((o, i) => {
-      if (o.type === "lines") return;
+    stars.forEach((o, i) => {
       const dx = (o.x - p.x) * canvas.width;
       const dy = (o.y - p.y) * canvas.height;
       const d2 = dx * dx + dy * dy;
-      const rad = Math.max(36, o.type === "orb" ? o.size * (1 + o.glow) : o.length * 0.45);
+      const rad = Math.max(40, o.length * 0.45);
       if (d2 < rad * rad && d2 < bestD) { bestD = d2; best = i; }
     });
-    if (best >= 0) return best;
-    for (let i = overlays.length - 1; i >= 0; i--) {
-      if (overlays[i].type === "lines") return i;
-    }
-    return -1;
-  }
-
-  canvas.addEventListener("pointerdown", (ev) => {
-    if (!overlays.length) return;
-    const p = canvasPoint(ev);
-    dragIdx = pickOverlay(p);
+    dragIdx = best;
     if (dragIdx >= 0) {
       canvas.setPointerCapture(ev.pointerId);
       ev.preventDefault();
     }
   });
   canvas.addEventListener("pointermove", (ev) => {
-    if (dragIdx < 0 || !overlays[dragIdx]) return;
+    if (dragIdx < 0 || !stars[dragIdx]) return;
     const p = canvasPoint(ev);
-    overlays[dragIdx].x = p.x;
-    overlays[dragIdx].y = p.y;
+    stars[dragIdx].x = p.x;
+    stars[dragIdx].y = p.y;
     render();
   });
   for (const evName of ["pointerup", "pointercancel"]) {
@@ -978,7 +1056,9 @@
       chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
     }
     chain.dither.enabled = true;
-    overlays = [];
+    stars = [];
+    overlayModules.orbs = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) };
+    overlayModules.lines = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) };
     buildOverlayList();
     syncControls();
     render();
@@ -1053,9 +1133,7 @@
     origBtn.addEventListener(evName, () => showOriginal(false));
   }
 
-  $("add-star-btn").addEventListener("click", () => addOverlay("star"));
-  $("add-orb-btn").addEventListener("click", () => addOverlay("orb"));
-  $("add-lines-btn").addEventListener("click", () => addOverlay("lines"));
+  $("add-star-btn").addEventListener("click", addStar);
 
   buildControls();
   buildOverlayList();
