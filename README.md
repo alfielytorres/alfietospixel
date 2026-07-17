@@ -24,15 +24,27 @@ Effects toggle on/off and stack top-to-bottom:
 | --- | --- |
 | **POSTER BURN** | posterize + hue rotate + solarize |
 | **DITHER** | pixelate + palette + ordered (Bayer 4×4/8×8), Floyd–Steinberg (raster or serpentine), Atkinson, or hard threshold |
-| **LINE SCREEN** | brightness becomes wavy horizontal/vertical contour lines (oscilloscope ripple) — control spacing, thickness and wave amount |
-| **ORBS** | glowing dot-halftone: a hex or square grid of orbs that grow and bloom with brightness |
 | **PIXEL SORT** | sorts runs of pixels by brightness inside a threshold band |
 | **RGB SHIFT** | chromatic aberration / channel displacement at any angle |
 | **SLICE GLITCH** | horizontal bands ripped sideways with optional channel tear |
 | **BLOCK CORRUPT** | databend-style blocks copied to the wrong place |
 | **WAVE WARP** | sinusoidal displacement warping |
-| **ANAMORPHIC FLARE** | bright points grow horizontal lens streaks / 4-point stars |
 | **VHS / CRT** | scanlines, chroma bleed, noise, tracking jitter, vignette |
+
+### Overlays (02.2)
+
+On top of the filter chain there's a separate **OVERLAYS** group — elements
+composited over the image, each one **draggable directly on the canvas**:
+
+- **STAR** — anamorphic lens star: horizontal streak, adjustable vertical
+  spike, thickness, intensity, any color.
+- **ORB** — glowing bokeh orb with core size, glow falloff, intensity, color.
+- **LINES** — scan-line screen with direction (horizontal/vertical), spacing,
+  thickness, opacity, color, an optional ripple that bends lines around the
+  image beneath, and a **balance** control: balanced, heavier left/top, or
+  heavier right/bottom (skewed). Dragging shifts the pattern's phase.
+
+Overlays render in image mode, live video preview, and all exports.
 
 ### Custom colors
 
@@ -110,6 +122,8 @@ tap opens the sheet. Desktop browsers keep normal downloads.
 
 - **reroll seed** — same settings, new random glitch (all randomness is seeded)
 - **randomize all** — rolls a whole new effect chain (including random custom colors)
+- **sticky preview** — the canvas stays in view while you scroll the
+  effect chain, so tweaking never means scrolling back up
 - **hold for original** — flip back to the source
 - paste from clipboard or drag-and-drop to load
 - demo pattern built in if you have no image handy

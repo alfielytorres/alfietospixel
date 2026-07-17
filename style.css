@@ -124,9 +124,19 @@ main { flex: 1; width: 100%; }
   padding: 1.6rem 2rem 2rem;
   border-right: 1px solid var(--hairline);
   min-width: 0;
+  position: sticky;      /* preview stays in view while scrolling the chain */
+  top: 0;
+  align-self: start;
+  background: var(--paper);
 }
 @media (max-width: 940px) {
-  .canvas-panel { border-right: none; border-bottom: 1px solid var(--hairline); }
+  .canvas-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--hairline);
+    z-index: 20;
+    padding: .8rem 1rem 1rem;
+  }
+  .canvas-panel canvas { max-height: 42vh; }
 }
 
 .canvas-wrap {
@@ -141,9 +151,11 @@ main { flex: 1; width: 100%; }
 }
 canvas {
   max-width: 100%;
-  max-height: 68vh;
+  max-height: 60vh;
   image-rendering: pixelated;
   display: block;
+  touch-action: none; /* pointer-drag overlays on touch screens */
+  cursor: crosshair;
 }
 
 .canvas-actions {
@@ -328,6 +340,45 @@ select:focus { border-color: var(--ink); outline: none; }
 }
 .color-item input[type="text"]:focus { border-color: var(--ink); outline: none; }
 .color-item input[type="text"].invalid { border-color: #cc2222; color: #cc2222; }
+
+/* ---- overlay items ---- */
+.overlays-header { margin-top: 2rem; align-items: center; gap: .8rem; }
+.overlays-header .index-label { margin-bottom: 0; white-space: nowrap; }
+.overlay-add { display: flex; gap: .35rem; }
+.overlay-add .btn { white-space: nowrap; padding: .5em .8em; }
+.overlay-item { border-bottom: 1px solid var(--hairline); padding: .6rem .2rem .9rem; }
+.overlay-item:first-child { border-top: 1px solid var(--hairline); }
+.overlay-head {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+}
+.overlay-head .overlay-name {
+  flex: 1;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .18em;
+}
+.overlay-head input[type="color"] {
+  width: 30px; height: 22px;
+  padding: 0;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+}
+.overlay-remove {
+  border: 1px solid var(--hairline);
+  background: transparent;
+  font: inherit;
+  font-size: .8rem;
+  line-height: 1;
+  width: 22px; height: 22px;
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.overlay-remove:hover { border-color: #cc2222; color: #cc2222; }
+.overlay-item .param { padding-left: 2rem; }
 
 /* ---- loader overlay ---- */
 .loader {

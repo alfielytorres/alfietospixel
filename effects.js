@@ -200,154 +200,6 @@ const Effects = (() => {
   }
 
   // ======================================================================
-  // LINE SCREEN — image brightness becomes wavy contour lines (the
-  // oscilloscope/CRT ripple look): brighter areas draw thicker lines and
-  // push them further off their track
-  // ======================================================================
-
-  function lineScreen(img, params) {
-    const w = img.width, h = img.height;
-    const src = img.data;
-    const res = new ImageData(w, h);
-    const d = res.data;
-    const vertical = params.direction === "vertical";
-    const spacing = Math.max(2, Math.round(params.spacing));
-    const weight = params.thickness;
-    const wave = params.wave;
-    const mode = params.color;
-
-    // background fill
-    const bg = mode === "paper" ? 240 : 8;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = bg; d[i + 1] = bg; d[i + 2] = bg; d[i + 3] = 255;
-    }
-
-    const L = vertical ? w : h; // axis the lines repeat along
-    const M = vertical ? h : w; // axis each line runs along
-
-    const lines = Math.ceil(L / spacing);
-    for (let k = 0; k <= lines; k++) {
-      const base = k * spacing + (spacing >> 1);
-      const cb = Math.min(L - 1, Math.max(0, base));
-      let bSmooth = -1;
-      for (let m = 0; m < M; m++) {
-        const sx = vertical ? cb : m;
-        const sy = vertical ? m : cb;
-        const si = (sy * w + sx) * 4;
-        let b = (0.2126 * src[si] + 0.7152 * src[si + 1] + 0.0722 * src[si + 2]) / 255;
-        // running smooth along the line keeps the contours flowing
-        bSmooth = bSmooth < 0 ? b : bSmooth * 0.72 + b * 0.28;
-        b = bSmooth;
-
-        const center = base - b * wave;
-        const half = Math.max(0.5, b * spacing * 0.5 * weight);
-        let r, g, bl;
-        if (mode === "image") {
-          const boost = 0.55 + 0.85 * b;
-          r = clamp255(src[si] * boost + 24 * b);
-          g = clamp255(src[si + 1] * boost + 24 * b);
-          bl = clamp255(src[si + 2] * boost + 24 * b);
-        } else if (mode === "paper") {
-          r = g = bl = 18;
-        } else {
-          r = g = bl = 255;
-        }
-
-        const c0 = Math.round(center - half), c1 = Math.round(center + half);
-        for (let t = c0; t <= c1; t++) {
-          if (t < 0 || t >= L) continue;
-          const px = vertical ? t : m;
-          const py = vertical ? m : t;
-          const di = (py * w + px) * 4;
-          d[di] = r; d[di + 1] = g; d[di + 2] = bl;
-        }
-      }
-    }
-    return res;
-  }
-
-  // ======================================================================
-  // ORB HALFTONE — the image becomes a grid of glowing orbs: brighter
-  // areas grow bigger, hotter dots with a soft bloom falloff
-  // ======================================================================
-
-  function orbHalftone(img, params) {
-    const w = img.width, h = img.height;
-    const src = img.data;
-    const res = new ImageData(w, h);
-    const d = res.data;
-    const spacing = Math.max(4, Math.round(params.spacing));
-    const sizeMul = params.size;
-    const glow = params.glow;
-    const hex = params.layout === "hex";
-    const mode = params.color;
-
-    const bg = mode === "paper" ? 242 : 4;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = bg; d[i + 1] = bg; d[i + 2] = bg; d[i + 3] = 255;
-    }
-
-    const rows = Math.ceil(h / spacing) + 1;
-    const cols = Math.ceil(w / spacing) + 1;
-    const maxR = spacing * 0.5 * sizeMul;
-    const glowR = maxR * (0.4 + glow * 1.6); // bloom reach beyond the core
-
-    for (let gy = 0; gy < rows; gy++) {
-      const offX = hex && (gy & 1) ? spacing / 2 : 0;
-      for (let gx = 0; gx < cols; gx++) {
-        const cx = gx * spacing + offX;
-        const cy = gy * spacing + (hex ? spacing * 0.43 : spacing / 2);
-        const sx = Math.min(w - 1, Math.max(0, Math.round(cx)));
-        const sy = Math.min(h - 1, Math.max(0, Math.round(cy)));
-        const si = (sy * w + sx) * 4;
-        const b = (0.2126 * src[si] + 0.7152 * src[si + 1] + 0.0722 * src[si + 2]) / 255;
-        // paper mode inverts: dark areas get the big ink dots
-        const v = mode === "paper" ? 1 - b : b;
-        if (v < 0.04) continue;
-
-        const r = v * maxR;
-        const reach = r + glowR * v;
-        let cr, cg, cb;
-        if (mode === "image") {
-          const boost = 0.6 + 0.9 * v;
-          cr = clamp255(src[si] * boost + 30 * v);
-          cg = clamp255(src[si + 1] * boost + 30 * v);
-          cb = clamp255(src[si + 2] * boost + 30 * v);
-        } else if (mode === "paper") {
-          cr = cg = cb = 16;
-        } else {
-          cr = cg = cb = 255;
-        }
-
-        const x0 = Math.max(0, Math.floor(cx - reach)), x1 = Math.min(w - 1, Math.ceil(cx + reach));
-        const y0 = Math.max(0, Math.floor(cy - reach)), y1 = Math.min(h - 1, Math.ceil(cy + reach));
-        for (let y = y0; y <= y1; y++) {
-          for (let x = x0; x <= x1; x++) {
-            const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-            let a;
-            if (dist <= r) a = 1;
-            else if (dist <= reach) {
-              const t = (dist - r) / (reach - r || 1);
-              a = (1 - t) * (1 - t) * glow; // soft quadratic bloom
-            } else continue;
-            const di = (y * w + x) * 4;
-            if (mode === "paper") { // ink accumulates darker
-              d[di] = Math.min(d[di], 242 - (242 - cr) * a);
-              d[di + 1] = Math.min(d[di + 1], 242 - (242 - cg) * a);
-              d[di + 2] = Math.min(d[di + 2], 242 - (242 - cb) * a);
-            } else { // light accumulates additively
-              d[di] = clamp255(d[di] + cr * a);
-              d[di + 1] = clamp255(d[di + 1] + cg * a);
-              d[di + 2] = clamp255(d[di + 2] + cb * a);
-            }
-          }
-        }
-      }
-    }
-    return res;
-  }
-
-  // ======================================================================
   // PIXEL SORT — sort runs of pixels by brightness within a threshold band
   // ======================================================================
 
@@ -530,81 +382,6 @@ const Effects = (() => {
   }
 
   // ======================================================================
-  // ANAMORPHIC FLARE — horizontal lens streaks from highlights, optional
-  // vertical spikes so bright points become four-point stars
-  // ======================================================================
-
-  const FLARE_TINTS = {
-    "cool blue": [0.45, 0.68, 1.0],
-    "cyan":      [0.35, 1.0, 0.92],
-    "magenta":   [1.0, 0.4, 0.85],
-    "warm":      [1.0, 0.78, 0.45],
-    "white":     [1.0, 1.0, 1.0],
-  };
-
-  function anamorphicFlare(img, params) {
-    const w = img.width, h = img.height;
-    const res = clone(img);
-    const d = res.data;
-    const src = img.data;
-    const thr = params.threshold;
-    const tint = FLARE_TINTS[params.tint] || FLARE_TINTS["cool blue"];
-    const gain = params.gain * 255;
-
-    // highlight pass: how far above the threshold each pixel is (0..1)
-    const hl = new Float32Array(w * h);
-    const range = Math.max(1, 255 - thr);
-    for (let i = 0, p = 0; i < src.length; i += 4, p++) {
-      const l = luma(src, i);
-      if (l > thr) hl[p] = (l - thr) / range;
-    }
-
-    // streak = exponential-decay smear of the highlights, both directions.
-    // decay chosen so intensity falls to ~2% at `length` pixels.
-    const smear = (buf, lineLen, lineCount, idx, len) => {
-      const decay = Math.exp(-4 / Math.max(2, len));
-      for (let line = 0; line < lineCount; line++) {
-        let acc = 0;
-        for (let p = 0; p < lineLen; p++) {
-          const k = idx(line, p);
-          acc = acc * decay + hl[k];
-          if (acc > buf[k]) buf[k] = acc;
-        }
-        acc = 0;
-        for (let p = lineLen - 1; p >= 0; p--) {
-          const k = idx(line, p);
-          acc = acc * decay + hl[k];
-          if (acc > buf[k]) buf[k] = acc;
-        }
-      }
-    };
-
-    const streak = new Float32Array(w * h);
-    smear(streak, w, h, (y, x) => y * w + x, params.length);
-    if (params.spikes) {
-      // vertical spikes are shorter, giving the classic star cross
-      smear(streak, h, w, (x, y) => y * w + x, params.length * 0.3);
-    }
-
-    // soften vertically (3-tap) and composite additively with tint
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const p = y * w + x;
-        let s = streak[p] * 0.6;
-        if (y > 0) s += streak[p - w] * 0.2;
-        if (y < h - 1) s += streak[p + w] * 0.2;
-        if (s <= 0.001) continue;
-        const i = p * 4;
-        const e = s * gain;
-        d[i] = clamp255(d[i] + e * tint[0]);
-        d[i + 1] = clamp255(d[i + 1] + e * tint[1]);
-        d[i + 2] = clamp255(d[i + 2] + e * tint[2]);
-      }
-    }
-    return res;
-  }
-
-  // ======================================================================
   // VHS / CRT — scanlines, chroma bleed, noise, jitter, vignette
   // ======================================================================
 
@@ -711,6 +488,167 @@ const Effects = (() => {
   }
 
   // ======================================================================
+  // OVERLAYS — elements composited ON TOP of the image, draggable on the
+  // canvas: anamorphic stars, glowing orbs, and scan-line screens
+  // ======================================================================
+
+  const OVERLAY_TYPES = {
+    star: {
+      name: "STAR",
+      defaults: { x: 0.5, y: 0.42, length: 200, spikes: 0.45, thickness: 2.5, intensity: 1, color: "#9db8ff" },
+      params: [
+        { key: "length", label: "streak length", min: 20, max: 600, step: 5, unit: "px" },
+        { key: "spikes", label: "vertical spike", min: 0, max: 1, step: 0.05 },
+        { key: "thickness", label: "thickness", min: 1, max: 10, step: 0.5, unit: "px" },
+        { key: "intensity", label: "intensity", min: 0, max: 2, step: 0.05 },
+      ],
+    },
+    orb: {
+      name: "ORB",
+      defaults: { x: 0.5, y: 0.5, size: 40, glow: 0.6, intensity: 1, color: "#ffd9a0" },
+      params: [
+        { key: "size", label: "core size", min: 4, max: 220, step: 1, unit: "px" },
+        { key: "glow", label: "glow", min: 0, max: 1, step: 0.05 },
+        { key: "intensity", label: "intensity", min: 0, max: 2, step: 0.05 },
+      ],
+    },
+    lines: {
+      name: "LINES",
+      defaults: { x: 0, y: 0, direction: "horizontal", spacing: 8, thickness: 2, wave: 0, balance: "balanced", intensity: 0.7, color: "#0a0a0a" },
+      params: [
+        { key: "direction", label: "direction", type: "select",
+          options: [["horizontal", "horizontal"], ["vertical", "vertical"]] },
+        { key: "spacing", label: "spacing", min: 2, max: 48, step: 1, unit: "px" },
+        { key: "thickness", label: "thickness", min: 1, max: 24, step: 1, unit: "px" },
+        { key: "balance", label: "balance", type: "select",
+          options: [["balanced", "balanced"], ["start", "heavier left / top"], ["end", "heavier right / bottom"]] },
+        { key: "wave", label: "ripple by image", min: 0, max: 30, step: 1, unit: "px" },
+        { key: "intensity", label: "opacity", min: 0, max: 1, step: 0.05 },
+      ],
+    },
+  };
+
+  // anamorphic star: separable gaussians — horizontal streak, optional
+  // vertical spike, soft core — added onto the image
+  function drawStar(d, w, h, o) {
+    const col = hexToRgb(o.color) || [255, 255, 255];
+    const cx = o.x * w, cy = o.y * h;
+    const L = o.length, T = Math.max(1, o.thickness), gain = o.intensity;
+    const spikeL = L * o.spikes;
+    const rx = Math.ceil(Math.max(L, T * 8));
+    const ry = Math.ceil(Math.max(spikeL, T * 8));
+    const x0 = Math.max(0, Math.floor(cx - rx)), x1 = Math.min(w - 1, Math.ceil(cx + rx));
+    const y0 = Math.max(0, Math.floor(cy - ry)), y1 = Math.min(h - 1, Math.ceil(cy + ry));
+    if (x1 < x0 || y1 < y0) return;
+    const g = (dv, s) => Math.exp(-(dv * dv) / (2 * s * s));
+    const n = x1 - x0 + 1;
+    const fxStreak = new Float32Array(n), fxThin = new Float32Array(n), fxCore = new Float32Array(n);
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx;
+      fxStreak[x - x0] = g(dx, L * 0.33);
+      fxThin[x - x0] = g(dx, T);
+      fxCore[x - x0] = g(dx, T * 3.5);
+    }
+    for (let y = y0; y <= y1; y++) {
+      const dy = y - cy;
+      const gyThin = g(dy, T);
+      const gySpike = spikeL > 1 ? g(dy, spikeL * 0.33) : 0;
+      const gyCore = g(dy, T * 3.5);
+      for (let x = x0; x <= x1; x++) {
+        const k = x - x0;
+        let v = fxStreak[k] * gyThin + fxCore[k] * gyCore * 0.9;
+        if (spikeL > 1) v += fxThin[k] * gySpike;
+        if (v < 0.004) continue;
+        const i = (y * w + x) * 4;
+        const a = v * gain;
+        d[i] = clamp255(d[i] + col[0] * a);
+        d[i + 1] = clamp255(d[i + 1] + col[1] * a);
+        d[i + 2] = clamp255(d[i + 2] + col[2] * a);
+      }
+    }
+  }
+
+  function drawOrb(d, w, h, o) {
+    const col = hexToRgb(o.color) || [255, 255, 255];
+    const cx = o.x * w, cy = o.y * h;
+    const r = o.size, reach = r * (1 + o.glow * 3) + 1, gain = o.intensity;
+    const x0 = Math.max(0, Math.floor(cx - reach)), x1 = Math.min(w - 1, Math.ceil(cx + reach));
+    const y0 = Math.max(0, Math.floor(cy - reach)), y1 = Math.min(h - 1, Math.ceil(cy + reach));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+        let a;
+        if (dist <= r) a = 1;
+        else if (dist < reach) { const t = (reach - dist) / (reach - r || 1); a = t * t; }
+        else continue;
+        a *= gain;
+        const i = (y * w + x) * 4;
+        d[i] = clamp255(d[i] + col[0] * a);
+        d[i + 1] = clamp255(d[i + 1] + col[1] * a);
+        d[i + 2] = clamp255(d[i + 2] + col[2] * a);
+      }
+    }
+  }
+
+  // scan-line screen blended over the image. balance skews the line
+  // opacity across the frame (heavier left/top or right/bottom);
+  // wave ripples each line by the brightness of the image beneath it.
+  // dragging shifts the pattern's phase via o.x / o.y.
+  function drawLines(d, w, h, o) {
+    const col = hexToRgb(o.color) || [10, 10, 10];
+    const vertical = o.direction === "vertical";
+    const spacing = Math.max(2, Math.round(o.spacing));
+    const th = Math.max(1, Math.round(o.thickness));
+    const wave = o.wave, alpha = o.intensity, bal = o.balance;
+    const L = vertical ? w : h, M = vertical ? h : w;
+    const phase = ((Math.round((vertical ? o.x : o.y) * L) % spacing) + spacing) % spacing;
+    const count = Math.ceil(L / spacing) + 1;
+    for (let k = -1; k <= count; k++) {
+      const base = k * spacing + phase;
+      if (base < -spacing || base > L + spacing) continue;
+      const pos = Math.min(1, Math.max(0, base / Math.max(1, L - 1)));
+      let gBal = 1;
+      if (bal === "start") gBal = (1 - pos) * (1 - pos);
+      else if (bal === "end") gBal = pos * pos;
+      const a0 = alpha * gBal;
+      if (a0 <= 0.003) continue;
+      let bSmooth = -1;
+      for (let m = 0; m < M; m++) {
+        let center = base;
+        if (wave > 0) {
+          const sx = vertical ? Math.min(w - 1, Math.max(0, Math.round(base))) : m;
+          const sy = vertical ? m : Math.min(h - 1, Math.max(0, Math.round(base)));
+          const si = (sy * w + sx) * 4;
+          const b = (0.2126 * d[si] + 0.7152 * d[si + 1] + 0.0722 * d[si + 2]) / 255;
+          bSmooth = bSmooth < 0 ? b : bSmooth * 0.75 + b * 0.25;
+          center = base - bSmooth * wave;
+        }
+        const c0 = Math.round(center - th / 2);
+        for (let t = c0; t < c0 + th; t++) {
+          if (t < 0 || t >= L) continue;
+          const px = vertical ? t : m, py = vertical ? m : t;
+          const i = (py * w + px) * 4;
+          d[i] += (col[0] - d[i]) * a0;
+          d[i + 1] += (col[1] - d[i + 1]) * a0;
+          d[i + 2] += (col[2] - d[i + 2]) * a0;
+        }
+      }
+    }
+  }
+
+  function renderOverlays(img, list) {
+    if (!list || !list.length) return img;
+    const res = clone(img);
+    const d = res.data, w = res.width, h = res.height;
+    for (const o of list) {
+      if (o.type === "star") drawStar(d, w, h, o);
+      else if (o.type === "orb") drawOrb(d, w, h, o);
+      else if (o.type === "lines") drawLines(d, w, h, o);
+    }
+    return res;
+  }
+
+  // ======================================================================
   // registry — order here is the pipeline order
   // ======================================================================
 
@@ -749,36 +687,6 @@ const Effects = (() => {
         { key: "amount", label: "dither strength", min: 0, max: 1.5, step: 0.05 },
         { key: "contrast", label: "contrast", min: 0.4, max: 2.5, step: 0.05 },
         { key: "brightness", label: "brightness", min: -100, max: 100, step: 1 },
-      ],
-    },
-    {
-      id: "linescreen",
-      name: "LINE SCREEN",
-      fn: lineScreen,
-      defaults: { direction: "horizontal", spacing: 8, thickness: 0.9, wave: 12, color: "image" },
-      params: [
-        { key: "direction", label: "direction", type: "select",
-          options: [["horizontal", "horizontal lines"], ["vertical", "vertical lines"]] },
-        { key: "spacing", label: "line spacing", min: 3, max: 40, step: 1, unit: "px" },
-        { key: "thickness", label: "thickness", min: 0.1, max: 1.5, step: 0.05 },
-        { key: "wave", label: "wave amount", min: 0, max: 40, step: 1, unit: "px" },
-        { key: "color", label: "color", type: "select",
-          options: [["image", "image colors"], ["mono", "white on black"], ["paper", "black on white"]] },
-      ],
-    },
-    {
-      id: "orbs",
-      name: "ORBS",
-      fn: orbHalftone,
-      defaults: { spacing: 14, size: 1, glow: 0.5, layout: "hex", color: "image" },
-      params: [
-        { key: "spacing", label: "orb spacing", min: 6, max: 48, step: 1, unit: "px" },
-        { key: "size", label: "orb size", min: 0.2, max: 1.6, step: 0.05 },
-        { key: "glow", label: "glow", min: 0, max: 1, step: 0.05 },
-        { key: "layout", label: "layout", type: "select",
-          options: [["hex", "hex grid"], ["square", "square grid"]] },
-        { key: "color", label: "color", type: "select",
-          options: [["image", "image colors"], ["mono", "white on black"], ["paper", "ink on paper"]] },
       ],
     },
     {
@@ -842,21 +750,6 @@ const Effects = (() => {
       ],
     },
     {
-      id: "flare",
-      name: "ANAMORPHIC FLARE",
-      fn: anamorphicFlare,
-      defaults: { threshold: 205, length: 160, gain: 1.2, tint: "cool blue", spikes: true },
-      params: [
-        { key: "threshold", label: "highlight threshold", min: 100, max: 254, step: 1 },
-        { key: "length", label: "streak length", min: 10, max: 500, step: 5, unit: "px" },
-        { key: "gain", label: "gain", min: 0, max: 3, step: 0.05 },
-        { key: "tint", label: "tint", type: "select",
-          options: Object.keys(FLARE_TINTS).map((k) => [k, k]) },
-        { key: "spikes", label: "star spikes", type: "select",
-          options: [[true, "on — 4-point stars"], [false, "off — streaks only"]] },
-      ],
-    },
-    {
       id: "vhs",
       name: "VHS / CRT",
       fn: vhs,
@@ -885,5 +778,5 @@ const Effects = (() => {
     return out;
   }
 
-  return { REGISTRY, PALETTES, apply, makeRng };
+  return { REGISTRY, PALETTES, apply, makeRng, OVERLAY_TYPES, renderOverlays };
 })();

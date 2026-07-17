@@ -42,6 +42,10 @@
   }
   chain.dither.enabled = true;
 
+  // ---- overlays: stars / orbs / line screens on top of the image ----
+  let overlays = [];
+  let dragIdx = -1;
+
   // =====================================================================
   // rendering — image mode
   // =====================================================================
@@ -51,7 +55,11 @@
     renderQueued = true;
     requestAnimationFrame(() => {
       renderQueued = false;
-      const out = holdOriginal ? sourceImage : Effects.apply(sourceImage, chain, seed);
+      let out = sourceImage;
+      if (!holdOriginal) {
+        out = Effects.apply(sourceImage, chain, seed);
+        out = Effects.renderOverlays(out, overlays);
+      }
       canvas.width = out.width;
       canvas.height = out.height;
       ctx.putImageData(out, 0, 0);
@@ -87,6 +95,7 @@
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
       frame = Effects.apply(frame, chain, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)));
+      frame = Effects.renderOverlays(frame, overlays);
     }
     if (canvas.width !== vw) canvas.width = vw;
     if (canvas.height !== vh) canvas.height = vh;
@@ -539,6 +548,7 @@
         pctx.drawImage(videoEl, 0, 0, pw, ph);
         let frame = pctx.getImageData(0, 0, pw, ph);
         frame = Effects.apply(frame, chain, frameSeedAt(i));
+        frame = Effects.renderOverlays(frame, overlays);
         pctx.putImageData(frame, 0, 0);
         ectx.drawImage(pcan, 0, 0, ew, eh); // crisp nearest-neighbor upscale
         // mirror progress on the visible canvas at preview size
@@ -799,6 +809,138 @@
   }
 
   // =====================================================================
+  // overlays UI + canvas dragging
+  // =====================================================================
+
+  function addOverlay(type) {
+    const def = Effects.OVERLAY_TYPES[type];
+    overlays.push({ type, ...structuredClone(def.defaults) });
+    buildOverlayList();
+    render();
+  }
+
+  function buildOverlayList() {
+    const list = $("overlay-list");
+    list.innerHTML = "";
+    overlays.forEach((o, idx) => {
+      const t = Effects.OVERLAY_TYPES[o.type];
+      const item = document.createElement("div");
+      item.className = "overlay-item";
+
+      const head = document.createElement("div");
+      head.className = "overlay-head";
+      const name = document.createElement("span");
+      name.className = "overlay-name";
+      name.textContent = `${t.name} ${idx + 1}`;
+      const colorIn = document.createElement("input");
+      colorIn.type = "color";
+      colorIn.value = o.color;
+      colorIn.setAttribute("aria-label", `${t.name} ${idx + 1} color`);
+      colorIn.addEventListener("input", () => { o.color = colorIn.value; render(); });
+      const rm = document.createElement("button");
+      rm.className = "overlay-remove";
+      rm.type = "button";
+      rm.textContent = "×";
+      rm.setAttribute("aria-label", `remove ${t.name} ${idx + 1}`);
+      rm.addEventListener("click", () => {
+        overlays.splice(idx, 1);
+        buildOverlayList();
+        render();
+      });
+      head.append(name, colorIn, rm);
+      item.appendChild(head);
+
+      for (const p of t.params) {
+        const row = document.createElement("div");
+        row.className = "param";
+        const label = document.createElement("div");
+        label.className = "param-label";
+        const nameEl = document.createElement("span");
+        nameEl.textContent = p.label;
+        const valEl = document.createElement("span");
+        valEl.className = "value";
+        label.append(nameEl, valEl);
+        row.appendChild(label);
+
+        if (p.type === "select") {
+          const sel = document.createElement("select");
+          for (const [val, text] of p.options) {
+            const opt = document.createElement("option");
+            opt.value = String(val);
+            opt.textContent = text;
+            sel.appendChild(opt);
+          }
+          sel.value = String(o[p.key]);
+          sel.addEventListener("change", () => { o[p.key] = sel.value; render(); });
+          row.appendChild(sel);
+          valEl.remove();
+        } else {
+          const slider = document.createElement("input");
+          slider.type = "range";
+          slider.min = p.min; slider.max = p.max; slider.step = p.step;
+          slider.value = o[p.key];
+          valEl.textContent = fmt(o[p.key], p);
+          slider.addEventListener("input", () => {
+            o[p.key] = parseFloat(slider.value);
+            valEl.textContent = fmt(o[p.key], p);
+            render();
+          });
+          row.appendChild(slider);
+        }
+        item.appendChild(row);
+      }
+      list.appendChild(item);
+    });
+  }
+
+  function canvasPoint(ev) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height)),
+    };
+  }
+
+  function pickOverlay(p) {
+    // nearest star/orb within its own footprint wins; else the topmost
+    // LINES overlay (its pattern is dragged by phase, so anywhere grabs it)
+    let best = -1, bestD = Infinity;
+    overlays.forEach((o, i) => {
+      if (o.type === "lines") return;
+      const dx = (o.x - p.x) * canvas.width;
+      const dy = (o.y - p.y) * canvas.height;
+      const d2 = dx * dx + dy * dy;
+      const rad = Math.max(36, o.type === "orb" ? o.size * (1 + o.glow) : o.length * 0.45);
+      if (d2 < rad * rad && d2 < bestD) { bestD = d2; best = i; }
+    });
+    if (best >= 0) return best;
+    for (let i = overlays.length - 1; i >= 0; i--) {
+      if (overlays[i].type === "lines") return i;
+    }
+    return -1;
+  }
+
+  canvas.addEventListener("pointerdown", (ev) => {
+    if (!overlays.length) return;
+    const p = canvasPoint(ev);
+    dragIdx = pickOverlay(p);
+    if (dragIdx >= 0) {
+      canvas.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    }
+  });
+  canvas.addEventListener("pointermove", (ev) => {
+    if (dragIdx < 0 || !overlays[dragIdx]) return;
+    const p = canvasPoint(ev);
+    overlays[dragIdx].x = p.x;
+    overlays[dragIdx].y = p.y;
+    render();
+  });
+  for (const evName of ["pointerup", "pointercancel"]) {
+    canvas.addEventListener(evName, () => { dragIdx = -1; });
+  }
+
+  // =====================================================================
   // actions
   // =====================================================================
 
@@ -836,6 +978,8 @@
       chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
     }
     chain.dither.enabled = true;
+    overlays = [];
+    buildOverlayList();
     syncControls();
     render();
   }
@@ -909,5 +1053,10 @@
     origBtn.addEventListener(evName, () => showOriginal(false));
   }
 
+  $("add-star-btn").addEventListener("click", () => addOverlay("star"));
+  $("add-orb-btn").addEventListener("click", () => addOverlay("orb"));
+  $("add-lines-btn").addEventListener("click", () => addOverlay("lines"));
+
   buildControls();
+  buildOverlayList();
 })();
