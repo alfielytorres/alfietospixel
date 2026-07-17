@@ -131,6 +131,7 @@
   }
 
   function enterWorkspace() {
+    document.body.classList.add("in-app");
     $("dropzone").hidden = true;
     $("workspace").hidden = false;
     updateModeUI();
@@ -169,6 +170,8 @@
     $("export-video-btn").hidden = !isVideo;
     $("res-wrap").hidden = !isVideo;
     $("playpause-btn").textContent = "PAUSE";
+    $("ab-play").hidden = !isVideo;
+    $("ab-play").textContent = "PAUSE";
   }
 
   function cleanupVideo() {
@@ -182,7 +185,7 @@
     videoEl = null;
     videoUrl = null;
     $("export-video-btn").disabled = false;
-    $("export-video-btn").textContent = "MOV ↓";
+    $("export-video-btn").textContent = "mov";
   }
 
   function loadFromImageElement(imgEl) {
@@ -316,6 +319,7 @@
       v.play().catch(() => {
         // autoplay refused (e.g. iOS Low Power Mode) — surface the play button
         $("playpause-btn").textContent = "PLAY";
+        $("ab-play").textContent = "PLAY";
       });
       cancelAnimationFrame(vidRaf);
       vidRaf = requestAnimationFrame(videoLoop);
@@ -616,7 +620,7 @@
       try { if (encoder.state !== "closed") encoder.close(); } catch { /* already closed */ }
       exporting = false;
       btn.disabled = false;
-      btn.textContent = "MOV ↓";
+      btn.textContent = "mov";
       if (videoEl) {
         videoEl.currentTime = 0;
         videoEl.play().catch(() => {});
@@ -654,7 +658,7 @@
         `versions-eye-${seed.toString(16)}.${ext}`);
       recording = false;
       btn.disabled = false;
-      btn.textContent = "MOV ↓";
+      btn.textContent = "mov";
     };
     const begin = () => {
       videoEl.play().catch(() => {});
@@ -677,7 +681,7 @@
     if (pendingShare) { // a finished export is waiting for this fresh tap
       const f = pendingShare;
       pendingShare = null;
-      $("export-video-btn").textContent = "MOV ↓";
+      $("export-video-btn").textContent = "mov";
       navigator.share({ files: [f], title: f.name }).catch((e) => {
         if (!e || e.name !== "AbortError") anchorDownload(f, f.name);
       });
@@ -1153,6 +1157,7 @@
   $("svg-btn").addEventListener("click", exportSvg);
   $("export-video-btn").addEventListener("click", exportVideo);
   $("new-image-btn").addEventListener("click", () => {
+    document.body.classList.remove("in-app");
     cleanupVideo();
     mode = "image";
     $("workspace").hidden = true;
@@ -1308,6 +1313,7 @@
     let node;
     if (def.kind === "effect") node = document.querySelector(`.effect[data-effect="${def.id}"]`);
     else if (def.kind === "module") node = document.querySelector(`[data-overlay-module="${def.id}"]`);
+    else if (def.kind === "export") node = document.querySelector(".export-bar");
     else node = $("star-section");
     if (!node) return;
     sheetStash = { node, parent: node.parentNode, next: node.nextSibling };
@@ -1342,6 +1348,22 @@
   // ---- PWA: offline app shell + add-to-home-screen ----
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+
+  // mobile app bar proxies the main actions
+  $("ab-new").addEventListener("click", () => $("new-image-btn").click());
+  $("ab-seed").addEventListener("click", () => $("reroll-btn").click());
+  $("ab-rand").addEventListener("click", () => $("random-btn").click());
+  $("ab-export").addEventListener("click", () =>
+    openSheetFor({ id: "export", label: "EXPORT", kind: "export" }));
+  $("ab-play").addEventListener("click", () => {
+    $("playpause-btn").click();
+    $("ab-play").textContent = $("playpause-btn").textContent;
+  });
+  const abOrig = $("ab-orig");
+  abOrig.addEventListener("pointerdown", () => showOriginal(true));
+  for (const evName of ["pointerup", "pointerleave", "pointercancel"]) {
+    abOrig.addEventListener(evName, () => showOriginal(false));
   }
 
   buildControls();

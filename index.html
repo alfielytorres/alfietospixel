@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>VERSIONS EYE</title>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -23,9 +23,9 @@
   <section id="dropzone" class="dropzone">
     <input type="file" id="file-input" accept="image/*,video/*,.heic,.heif" hidden>
     <div class="dropzone-inner">
-      <p class="drop-title">DROP AN IMAGE OR VIDEO</p>
+      <p class="drop-title">Drop an image<br>or video.</p>
       <p class="hint">click · drag · paste — video up to 15s</p>
-      <button id="demo-btn" class="btn" type="button">TRY THE DEMO</button>
+      <button id="demo-btn" class="btn btn-cta" type="button">try the demo</button>
     </div>
   </section>
 
@@ -48,8 +48,8 @@
       </div>
       <div class="export-bar">
         <div class="export-actions">
-          <button id="download-btn" class="btn btn-primary" type="button">PNG ↓</button>
-          <button id="svg-btn" class="btn btn-primary" type="button">SVG ↓</button>
+          <button id="download-btn" class="btn btn-cta" type="button">png</button>
+          <button id="svg-btn" class="btn btn-cta" type="button">svg</button>
           <span id="res-wrap" class="res-wrap" hidden>
             <label for="export-res" class="res-label">RES</label>
             <select id="export-res">
@@ -58,8 +58,16 @@
               <option value="preview">preview size (fast)</option>
             </select>
           </span>
-          <button id="export-video-btn" class="btn btn-primary" type="button" hidden>MOV ↓</button>
+          <button id="export-video-btn" class="btn btn-cta" type="button" hidden>mov</button>
         </div>
+      </div>
+      <div id="app-bar" class="app-bar">
+        <button id="ab-new" class="ab-btn" type="button">NEW</button>
+        <button id="ab-orig" class="ab-btn" type="button">HOLD</button>
+        <button id="ab-play" class="ab-btn" type="button" hidden>PAUSE</button>
+        <button id="ab-seed" class="ab-btn" type="button">SEED</button>
+        <button id="ab-rand" class="ab-btn" type="button">RANDOM</button>
+        <button id="ab-export" class="ab-btn ab-primary" type="button">EXPORT</button>
       </div>
     </div>
 
