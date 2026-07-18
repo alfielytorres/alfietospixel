@@ -1,9 +1,20 @@
 # VERSIONS EYE — glitch studio
 
-Drop an image **or a video (max 15 s; the first 10 s are edited)** in, build an effect chain,
-export as **PNG, SVG or MOV**. Everything runs client-side in the browser
-(vanilla JS + canvas + WebCodecs) — no build step, no server, files never
-leave your machine.
+Two ways in: **recorded** — drop an image or a video (max 15 s; the first
+10 s are edited) — or **live** — open the camera and run the same effect
+chain on the feed in realtime, with an optional recording (video + voice,
+max 15 s). Export as **PNG, SVG or MOV**. Everything runs client-side in
+the browser (vanilla JS + canvas + WebCodecs) — no build step, no server,
+files never leave your machine.
+
+## Live mode
+
+**go live** opens the front camera (with mic permission for voice); the
+preview runs through the exact same effects, overlays and looks as files.
+**record** captures the processed canvas plus your voice into a clip,
+auto-stopping at 15 s (tap again to stop earlier); on phones it hands the
+file to the share sheet. **flip camera** switches front/back. Camera
+access requires HTTPS.
 
 ## Run it
 

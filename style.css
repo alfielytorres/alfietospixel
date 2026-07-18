@@ -119,6 +119,9 @@ main { flex: 1; width: 100%; }
   flex-wrap: wrap;
   margin-top: 1.8rem;
 }
+.btn-demo { margin-top: 1rem; border-color: var(--hairline); color: var(--ink-2); }
+.btn-demo:hover { border-color: var(--ink); }
+.rec-live { background: #c0271f !important; border-color: #c0271f !important; color: #fff !important; }
 .hint {
   color: var(--muted);
   font-size: .78rem;

@@ -51,6 +51,18 @@
   let stars = [];
   let dragIdx = -1;
 
+  // live camera state
+  let camStream = null;
+  let camVideo = null;
+  let liveRaf = 0;
+  let liveStart = 0;
+  let camFacing = "user";
+  let liveRecorder = null;
+  let liveRecording = false;
+  let liveChunks = [];
+  let liveRecStart = 0;
+  const MAX_LIVE_SECONDS = 15;
+
   // =====================================================================
   // rendering — image mode
   // =====================================================================
@@ -166,12 +178,17 @@
 
   function updateModeUI() {
     const isVideo = mode === "video";
+    const isLive = mode === "live";
     $("playpause-btn").hidden = !isVideo;
     $("export-video-btn").hidden = !isVideo;
     $("res-wrap").hidden = !isVideo;
     $("playpause-btn").textContent = "PAUSE";
     $("ab-play").hidden = !isVideo;
     $("ab-play").textContent = "PAUSE";
+    $("record-btn").hidden = !isLive;
+    $("flip-btn").hidden = !isLive;
+    $("ab-flip").hidden = !isLive;
+    $("ab-export").textContent = isLive ? "RECORD" : "EXPORT";
   }
 
   function cleanupVideo() {
@@ -190,6 +207,7 @@
 
   function loadFromImageElement(imgEl) {
     cleanupVideo();
+    cleanupLive();
     let w = imgEl.naturalWidth || imgEl.width;
     let h = imgEl.naturalHeight || imgEl.height;
     if (!w || !h) return;
@@ -204,6 +222,146 @@
     mode = "image";
     enterWorkspace();
     render();
+  }
+
+  // =====================================================================
+  // LIVE mode — camera + mic through the same effect pipeline, with an
+  // optional recording (video + voice) capped at 15 seconds
+  // =====================================================================
+
+  function cleanupLive() {
+    cancelAnimationFrame(liveRaf);
+    if (liveRecorder && liveRecorder.state !== "inactive") {
+      try { liveRecorder.stop(); } catch { /* already stopping */ }
+    }
+    liveRecording = false;
+    if (camStream) for (const t of camStream.getTracks()) t.stop();
+    camStream = null;
+    camVideo = null;
+    $("record-btn").textContent = "record";
+    $("record-btn").classList.remove("rec-live");
+    $("ab-export").classList.remove("rec-live");
+  }
+
+  async function startLive() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("This browser can't open the camera. Note: camera needs HTTPS.");
+      return;
+    }
+    cleanupVideo();
+    cleanupLive();
+    showLoader("starting camera…");
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: camFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: true,
+      });
+    } catch (e) {
+      hideLoader();
+      alert("Camera/microphone access was blocked. Allow it in your browser settings and try again.");
+      return;
+    }
+    const v = document.createElement("video");
+    v.muted = true; // no feedback loop; the mic track still records
+    v.playsInline = true;
+    v.setAttribute("muted", "");
+    v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
+    v.srcObject = camStream;
+    v.addEventListener("loadedmetadata", () => {
+      const w = v.videoWidth, h = v.videoHeight;
+      if (!w || !h) { hideLoader(); cleanupLive(); return; }
+      const dimCap = isMobile() ? 640 : MAX_VIDEO_DIM;
+      const ratio = Math.min(1, dimCap / Math.max(w, h));
+      vidCanvas.width = Math.max(1, Math.round(w * ratio));
+      vidCanvas.height = Math.max(1, Math.round(h * ratio));
+      camVideo = v;
+      mode = "live";
+      liveStart = performance.now();
+      enterWorkspace();
+      v.play().catch(() => {});
+      cancelAnimationFrame(liveRaf);
+      liveRaf = requestAnimationFrame(liveLoop);
+    }, { once: true });
+  }
+
+  function liveLoop() {
+    if (mode !== "live" || !camVideo) return;
+    if (camVideo.readyState < 2) {
+      liveRaf = requestAnimationFrame(liveLoop);
+      return;
+    }
+    hideLoader();
+    const vw = vidCanvas.width, vh = vidCanvas.height;
+    vctx.drawImage(camVideo, 0, 0, vw, vh);
+    let frame = vctx.getImageData(0, 0, vw, vh);
+    if (!holdOriginal) {
+      const f = Math.floor(((performance.now() - liveStart) / 1000) * EXPORT_FPS);
+      frame = Effects.apply(frame, chain, frameSeedAt(f));
+      frame = Effects.renderOverlayStack(frame, overlayModules, stars, true);
+    }
+    if (canvas.width !== vw) canvas.width = vw;
+    if (canvas.height !== vh) canvas.height = vh;
+    ctx.putImageData(frame, 0, 0);
+
+    if (liveRecording) {
+      const el = (performance.now() - liveRecStart) / 1000;
+      const label = `stop ${el.toFixed(1)}s / ${MAX_LIVE_SECONDS}s`;
+      $("record-btn").textContent = label;
+      $("ab-export").textContent = "STOP " + el.toFixed(0) + "S";
+      if (el >= MAX_LIVE_SECONDS) stopLiveRecord();
+    }
+    liveRaf = requestAnimationFrame(liveLoop);
+  }
+
+  function stopLiveRecord() {
+    if (liveRecorder && liveRecorder.state !== "inactive") liveRecorder.stop();
+  }
+
+  function toggleLiveRecord() {
+    if (mode !== "live" || !camStream) return;
+    if (liveRecording) { stopLiveRecord(); return; }
+    if (typeof MediaRecorder === "undefined") {
+      alert("This browser doesn't support recording.");
+      return;
+    }
+    const pick = [
+      ["video/mp4;codecs=avc1.64002A", "mov"],
+      ["video/mp4", "mov"],
+      ["video/webm;codecs=vp9,opus", "webm"],
+      ["video/webm;codecs=vp8,opus", "webm"],
+      ["video/webm", "webm"],
+    ].find(([m]) => MediaRecorder.isTypeSupported(m));
+    if (!pick) { alert("No supported recording format found."); return; }
+    const [mime, ext] = pick;
+
+    const stream = canvas.captureStream(EXPORT_FPS);
+    for (const t of camStream.getAudioTracks()) stream.addTrack(t); // voice in
+    liveRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 });
+    liveChunks = [];
+    liveRecorder.ondataavailable = (e) => { if (e.data.size) liveChunks.push(e.data); };
+    liveRecorder.onstop = () => {
+      liveRecording = false;
+      $("record-btn").textContent = "record";
+      $("record-btn").classList.remove("rec-live");
+      $("ab-export").textContent = "RECORD";
+      $("ab-export").classList.remove("rec-live");
+      if (liveChunks.length) {
+        deliverFile(new Blob(liveChunks, { type: liveRecorder.mimeType || mime }),
+          `versions-eye-live-${Date.now().toString(36)}.${ext}`);
+      }
+    };
+    liveRecorder.start(200);
+    liveRecording = true;
+    liveRecStart = performance.now();
+    $("record-btn").classList.add("rec-live");
+    $("ab-export").classList.add("rec-live");
+  }
+
+  async function flipCamera() {
+    if (mode !== "live") return;
+    camFacing = camFacing === "user" ? "environment" : "user";
+    await startLive();
   }
 
   // ---- HEIC (iPhone photos): Safari decodes natively; everywhere else we
@@ -257,6 +415,7 @@
 
   function loadVideoFile(file) {
     cleanupVideo();
+    cleanupLive();
     showLoader("LOADING VIDEO…");
     videoUrl = URL.createObjectURL(file);
     const v = document.createElement("video");
@@ -1117,7 +1276,8 @@
 
   const dropzone = $("dropzone");
   dropzone.addEventListener("click", (ev) => {
-    if (ev.target.id !== "demo-btn") $("file-input").click();
+    if (ev.target.closest && ev.target.closest("#demo-btn, #live-btn")) return;
+    $("file-input").click();
   });
   $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
   $("demo-btn").addEventListener("click", loadDemo);
@@ -1159,6 +1319,7 @@
   $("new-image-btn").addEventListener("click", () => {
     document.body.classList.remove("in-app");
     cleanupVideo();
+    cleanupLive();
     mode = "image";
     $("workspace").hidden = true;
     $("dropzone").hidden = false;
@@ -1413,13 +1574,19 @@
 
   // header CTA + explicit chooser both open the file picker
   $("header-cta").addEventListener("click", () => $("file-input").click());
+  $("live-btn").addEventListener("click", (ev) => { ev.stopPropagation(); startLive(); });
+  $("record-btn").addEventListener("click", toggleLiveRecord);
+  $("flip-btn").addEventListener("click", flipCamera);
+  $("ab-flip").addEventListener("click", flipCamera);
 
   // mobile app bar proxies the main actions
   $("ab-new").addEventListener("click", () => $("new-image-btn").click());
   $("ab-seed").addEventListener("click", () => $("reroll-btn").click());
   $("ab-rand").addEventListener("click", () => $("random-btn").click());
-  $("ab-export").addEventListener("click", () =>
-    openSheetFor({ id: "export", label: "EXPORT", kind: "export" }));
+  $("ab-export").addEventListener("click", () => {
+    if (mode === "live") { toggleLiveRecord(); return; }
+    openSheetFor({ id: "export", label: "EXPORT", kind: "export" });
+  });
   $("ab-play").addEventListener("click", () => {
     $("playpause-btn").click();
     $("ab-play").textContent = $("playpause-btn").textContent;
