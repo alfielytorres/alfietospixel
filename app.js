@@ -109,6 +109,7 @@
     }
 
     vctx.drawImage(videoEl, 0, 0, vw, vh);
+    if (thumbsStale) { thumbsStale = false; renderLookThumbs(); }
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
       frame = Effects.apply(frame, chain, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)));
@@ -154,6 +155,8 @@
     wrap.classList.add("reveal");
     setTimeout(() => wrap.classList.remove("reveal"), 1000);
     firstRunTip();
+    thumbsStale = true;
+    if (mode === "image") { thumbsStale = false; renderLookThumbs(); }
   }
 
   function toast(msg, ms) {
@@ -294,6 +297,7 @@
     hideLoader();
     const vw = vidCanvas.width, vh = vidCanvas.height;
     vctx.drawImage(camVideo, 0, 0, vw, vh);
+    if (thumbsStale) { thumbsStale = false; renderLookThumbs(); }
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
       const f = Math.floor(((performance.now() - liveStart) / 1000) * EXPORT_FPS);
@@ -609,26 +613,32 @@
     canvas.toBlob((blob) => deliverFile(blob, `versions-eye-${seed.toString(16)}.png`), "image/png");
   }
 
-  // ---- SVG export: sample the canvas on a coarse grid, RLE runs per row,
-  // one <path> per color so the file stays compact and truly scalable ----
+  // ---- SVG export: reproduce the preview faithfully. When dither is on
+  // we sample on the EXACT dither grid (aligned at 0,0 — every pixel in a
+  // dither cell is identical), so the vector output is pixel-perfect
+  // against the preview; otherwise a fine uniform grid is used ----
   function exportSvg() {
     const w = canvas.width, h = canvas.height;
     if (!w || !h) return;
     const img = ctx.getImageData(0, 0, w, h).data;
 
-    let cell = Math.max(1, Math.ceil(Math.max(w, h) / SVG_MAX_CELLS));
+    let cell;
     if (chain.dither.enabled) {
-      cell = Math.max(cell, Math.round(chain.dither.params.pixelSize));
+      const px = Math.max(1, Math.round(chain.dither.params.pixelSize));
+      cell = px;
+      while (Math.max(w, h) / cell > 640) cell += px; // stay aligned to the grid
+    } else {
+      cell = Math.max(1, Math.ceil(Math.max(w, h) / 480));
     }
     const gw = Math.ceil(w / cell), gh = Math.ceil(h / cell);
 
-    // sample cell centers
+    // sample the top-left pixel of each cell (exact for dithered output)
     const grid = new Int32Array(gw * gh);
     const counts = new Map();
     for (let gy = 0; gy < gh; gy++) {
       for (let gx = 0; gx < gw; gx++) {
-        const x = Math.min(w - 1, gx * cell + (cell >> 1));
-        const y = Math.min(h - 1, gy * cell + (cell >> 1));
+        const x = Math.min(w - 1, gx * cell);
+        const y = Math.min(h - 1, gy * cell);
         const i = (y * w + x) * 4;
         const c = (img[i] << 16) | (img[i + 1] << 8) | img[i + 2];
         grid[gy * gw + gx] = c;
@@ -636,21 +646,37 @@
       }
     }
 
-    // most common color becomes the background rect
+    // overlays/gradients can yield thousands of colors — quantize only
+    // then, so plain dithered exports stay exact
+    if (counts.size > 512) {
+      counts.clear();
+      for (let k = 0; k < grid.length; k++) {
+        const c = grid[k];
+        const q = (c & 0xf8f8f8) | ((c >> 5) & 0x070707); // 5 bits/channel
+        grid[k] = q;
+        counts.set(q, (counts.get(q) || 0) + 1);
+      }
+    }
+
     let bg = 0, bgCount = -1;
     for (const [c, n] of counts) if (n > bgCount) { bg = c; bgCount = n; }
 
+    // paths in true pixel units with exact partial edge cells, so the
+    // SVG at native size is a 1:1 match with the preview canvas
     const hex = (c) => "#" + c.toString(16).padStart(6, "0");
-    const paths = new Map(); // color -> path data
+    const paths = new Map();
     for (let gy = 0; gy < gh; gy++) {
+      const y0 = gy * cell;
+      const rowH = Math.min(cell, h - y0);
       let runColor = -1, runStart = 0;
       for (let gx = 0; gx <= gw; gx++) {
         const c = gx < gw ? grid[gy * gw + gx] : -1;
         if (c !== runColor) {
           if (runColor >= 0 && runColor !== bg) {
-            const len = gx - runStart;
+            const x0 = runStart * cell;
+            const len = Math.min(gx * cell, w) - x0;
             const d = paths.get(runColor) || [];
-            d.push(`M${runStart} ${gy}h${len}v1h-${len}z`);
+            d.push(`M${x0} ${y0}h${len}v${rowH}h-${len}z`);
             paths.set(runColor, d);
           }
           runColor = c;
@@ -659,12 +685,12 @@
       }
     }
 
-    let body = `<rect width="${gw}" height="${gh}" fill="${hex(bg)}"/>`;
+    let body = `<rect width="${w}" height="${h}" fill="${hex(bg)}"/>`;
     for (const [c, d] of paths) {
       body += `<path fill="${hex(c)}" d="${d.join("")}"/>`;
     }
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${gw} ${gh}" ` +
-      `width="${gw * cell}" height="${gh * cell}" shape-rendering="crispEdges">${body}</svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" ` +
+      `width="${w}" height="${h}" shape-rendering="crispEdges">${body}</svg>`;
     deliverFile(new Blob([svg], { type: "image/svg+xml" }), `versions-eye-${seed.toString(16)}.svg`);
   }
 
@@ -1309,6 +1335,7 @@
 
   $("reroll-btn").addEventListener("click", () => {
     seed = (Math.random() * 0xffffffff) >>> 0;
+    renderLookThumbs();
     render();
   });
   $("random-btn").addEventListener("click", randomizeAll);
@@ -1387,6 +1414,51 @@
     },
   };
 
+  function lookStates(name) {
+    const c = {};
+    for (const e of Effects.REGISTRY) c[e.id] = { enabled: false, params: structuredClone(e.defaults) };
+    const m = {
+      orbs: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) },
+      lines: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) },
+    };
+    LOOKS[name](c, m);
+    return { c, m };
+  }
+
+  function thumbSource(w, h) {
+    const t = document.createElement("canvas");
+    t.width = w; t.height = h;
+    const g = t.getContext("2d");
+    if (mode === "image" && sourceImage) {
+      const s = document.createElement("canvas");
+      s.width = sourceImage.width; s.height = sourceImage.height;
+      s.getContext("2d").putImageData(sourceImage, 0, 0);
+      g.drawImage(s, 0, 0, w, h);
+    } else if (vidCanvas.width > 1 && (videoEl || camVideo)) {
+      g.drawImage(vidCanvas, 0, 0, w, h); // raw current frame
+    } else {
+      return null;
+    }
+    return g.getImageData(0, 0, w, h);
+  }
+
+  // live preview: every look chip renders ITS look on the actual image
+  function renderLookThumbs() {
+    const src = thumbSource(96, 64);
+    if (!src) return;
+    document.querySelectorAll("#looks-bar .look").forEach((btn) => {
+      const name = btn.dataset.look;
+      if (!name || !LOOKS[name]) return;
+      const th = btn.querySelector("canvas");
+      if (!th) return;
+      const { c, m } = lookStates(name);
+      let out = Effects.apply(src, c, seed);
+      out = Effects.renderOverlayStack(out, m, [], false);
+      th.getContext("2d").putImageData(out, 0, 0);
+    });
+  }
+  let thumbsStale = true;
+
   function applyLook(name) {
     closeSheet(true);
     for (const e of Effects.REGISTRY) {
@@ -1399,7 +1471,7 @@
     buildOverlayModules();
     updateChips();
     document.querySelectorAll("#looks-bar .look").forEach((el) =>
-      el.classList.toggle("active", el.textContent === name));
+      el.classList.toggle("active", el.dataset.look === name));
     render();
   }
 
@@ -1410,7 +1482,13 @@
       const b = document.createElement("button");
       b.type = "button";
       b.className = "look";
-      b.textContent = name;
+      b.dataset.look = name;
+      const th = document.createElement("canvas");
+      th.className = "look-thumb";
+      th.width = 96; th.height = 64;
+      const lab = document.createElement("span");
+      lab.textContent = name;
+      b.append(th, lab);
       b.addEventListener("click", () => applyLook(name));
       bar.appendChild(b);
     }

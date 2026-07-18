@@ -1,7 +1,7 @@
 /* VERSIONS EYE service worker — precache the app shell so the studio
  * works offline / from the home screen; runtime-cache everything else
  * same-origin (e.g. the lazy HEIC decoder) on first use. */
-const CACHE = "versions-eye-v6";
+const CACHE = "versions-eye-v7";
 const SHELL = [
   "./",
   "index.html",

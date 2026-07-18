@@ -459,20 +459,31 @@ select:focus { border-color: var(--ink); outline: none; }
 .looks-bar::-webkit-scrollbar { display: none; }
 .look {
   flex: 0 0 auto;
-  font: 500 .74rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .3rem;
+  font: 500 .64rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
   letter-spacing: .02em;
   text-transform: lowercase;
-  padding: .7em 1.05em;
-  border: 1px solid var(--ink);
-  background: transparent;
+  padding: .35em .45em .5em;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
   color: var(--ink);
   white-space: nowrap;
   cursor: pointer;
-  transition: background .12s, color .12s, transform .06s;
+  transition: background .12s, color .12s, transform .06s, border-color .12s;
 }
-.look:hover { background: var(--ink); color: var(--paper); }
+.look-thumb {
+  width: 66px;
+  height: 44px;
+  display: block;
+  image-rendering: pixelated;
+  background: #ddd;
+}
+.look:hover { border-color: var(--ink); }
 .look:active { transform: translateY(1px); }
-.look.active { background: var(--lavender); border-color: var(--ink); color: var(--ink); }
+.look.active { background: var(--lavender); border-color: var(--ink); }
 
 /* ---- toast ---- */
 .toast {
