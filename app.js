@@ -1586,9 +1586,17 @@
     }
   });
 
-  // ---- PWA: offline app shell + add-to-home-screen ----
+  // ---- PWA: offline app shell + add-to-home-screen. When a new version
+  // activates, refresh once so users never sit on stale code ----
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
   }
 
   // ---- landing wordmark art: the brand word rendered as a field of
@@ -1824,18 +1832,19 @@
       `<circle cx="${x2}" cy="${y2}" r="3.5" fill="#d6cbfa"/>`;
   }
 
-  function makeNodeDraggable(card) {
-    const grip = card.querySelector(".node-drag");
-    if (!grip) return;
+  function makeNodeDraggable(card, wholeCard) {
     let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-    grip.addEventListener("pointerdown", (ev) => {
+    card.addEventListener("pointerdown", (ev) => {
+      // controls stay interactive; everything else on the card drags it
+      if (ev.target.closest("button, input, select, textarea, canvas, .node-row, .node-add-menu")) return;
+      if (!wholeCard && !ev.target.closest(".node-title")) return;
       dragging = true;
-      grip.setPointerCapture(ev.pointerId);
+      card.setPointerCapture(ev.pointerId);
       sx = ev.clientX; sy = ev.clientY;
       ox = card._x || 0; oy = card._y || 0;
       ev.preventDefault();
     });
-    grip.addEventListener("pointermove", (ev) => {
+    card.addEventListener("pointermove", (ev) => {
       if (!dragging) return;
       card._x = ox + ev.clientX - sx;
       card._y = oy + ev.clientY - sy;
@@ -1843,7 +1852,7 @@
       updateWire();
     });
     for (const n of ["pointerup", "pointercancel"]) {
-      grip.addEventListener(n, () => { dragging = false; });
+      card.addEventListener(n, () => { dragging = false; });
     }
   }
 
@@ -1911,8 +1920,9 @@
     if (mode === "video") $("export-video-btn").click();
     else if (mode === "live") toggleLiveRecord();
   });
-  makeNodeDraggable($("node-stack"));
-  makeNodeDraggable($("node-preview"));
+  makeNodeDraggable($("node-stack"), true);
+  makeNodeDraggable($("node-preview"), true);
+  makeNodeDraggable($("node-params"), false); // by its title bar
   window.addEventListener("resize", () => {
     if (window.innerWidth <= 940) exitNodeView();
     updateWire();

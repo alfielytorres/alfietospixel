@@ -718,7 +718,9 @@ body.node-mode #node-view { display: block; }
   box-shadow: 0 10px 40px rgba(0, 0, 0, .5);
   color: var(--ink);
   min-width: 230px;
+  cursor: move;
 }
+#node-stack, #node-preview, .node-title { touch-action: none; }
 #node-stack { left: 7%; top: 60px; width: 260px; }
 #node-preview { left: 42%; top: 90px; }
 #node-params { right: 26px; top: 60px; width: 320px; max-height: calc(100% - 100px); overflow-y: auto; }
