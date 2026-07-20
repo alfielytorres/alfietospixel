@@ -192,6 +192,8 @@
     $("flip-btn").hidden = !isLive;
     $("ab-flip").hidden = !isLive;
     $("ab-export").textContent = isLive ? "RECORD" : "EXPORT";
+    $("nv-export").hidden = !(isVideo || isLive);
+    $("nv-export").textContent = isLive ? "record" : "export mov";
   }
 
   function cleanupVideo() {
@@ -1674,6 +1676,252 @@
   for (const evName of ["pointerup", "pointerleave", "pointercancel"]) {
     abOrig.addEventListener(evName, () => showOriginal(false));
   }
+
+  // =====================================================================
+  // node view — sketchdesign-style workspace: the enabled effects as a
+  // stack of node rows wired to a draggable preview card on a dark grid
+  // =====================================================================
+
+  let nodeParamsStash = null;
+
+  const NODE_DEFS = () => [
+    ...Effects.REGISTRY.map((e) => ({ id: e.id, label: e.name, kind: "effect" })),
+    { id: "orbs", label: "ORBS", kind: "module" },
+    { id: "lines", label: "LINES", kind: "module" },
+  ];
+
+  function nodeEnabled(def) {
+    return def.kind === "effect" ? chain[def.id].enabled : overlayModules[def.id].enabled;
+  }
+  function setNodeEnabled(def, on) {
+    if (def.kind === "effect") chain[def.id].enabled = on;
+    else overlayModules[def.id].enabled = on;
+    const sel = def.kind === "effect"
+      ? `.effect[data-effect="${def.id}"] .effect-toggle`
+      : `[data-overlay-module="${def.id}"] .effect-toggle`;
+    const t = document.querySelector(sel);
+    if (t) t.checked = on;
+    const box = t && t.closest(".effect");
+    if (box) box.classList.toggle("enabled", on);
+  }
+
+  function renderNodeStack() {
+    if (!document.body.classList.contains("node-mode")) return;
+    const rows = $("node-rows");
+    rows.innerHTML = "";
+    let any = false;
+    for (const def of NODE_DEFS()) {
+      if (!nodeEnabled(def)) continue;
+      any = true;
+      const row = document.createElement("div");
+      row.className = "node-row";
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      const name = document.createElement("span");
+      name.className = "node-name";
+      name.textContent = def.label;
+      const x = document.createElement("button");
+      x.className = "node-x";
+      x.type = "button";
+      x.textContent = "×";
+      x.setAttribute("aria-label", `remove ${def.label}`);
+      x.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        setNodeEnabled(def, false);
+        if (nodeParamsStash && nodeParamsStash.def.id === def.id) closeNodeParams();
+        renderNodeStack();
+        updateChips();
+        render();
+        requestAnimationFrame(updateWire);
+      });
+      row.append(dot, name, x);
+      row.addEventListener("click", () => openNodeParams(def));
+      rows.appendChild(row);
+    }
+    if (stars.length) {
+      any = true;
+      const row = document.createElement("div");
+      row.className = "node-row";
+      row.innerHTML = `<span class="dot"></span><span class="node-name">stars (${stars.length})</span>`;
+      row.addEventListener("click", () => openNodeParams({ id: "stars", label: "STARS", kind: "stars" }));
+      rows.appendChild(row);
+    }
+    if (!any) {
+      const empty = document.createElement("div");
+      empty.className = "node-row-empty";
+      empty.textContent = "empty stack — add an effect";
+      rows.appendChild(empty);
+    }
+    requestAnimationFrame(updateWire);
+  }
+
+  function buildNodeAddMenu() {
+    const menu = $("node-add-menu");
+    menu.innerHTML = "";
+    for (const def of NODE_DEFS()) {
+      if (nodeEnabled(def)) continue;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = def.label;
+      b.addEventListener("click", () => {
+        setNodeEnabled(def, true);
+        menu.hidden = true;
+        renderNodeStack();
+        updateChips();
+        render();
+        openNodeParams(def);
+      });
+      menu.appendChild(b);
+    }
+    const star = document.createElement("button");
+    star.type = "button";
+    star.textContent = "+ star overlay";
+    star.addEventListener("click", () => {
+      menu.hidden = true;
+      addStar();
+      renderNodeStack();
+    });
+    menu.appendChild(star);
+  }
+
+  function openNodeParams(def) {
+    closeNodeParams();
+    let node;
+    if (def.kind === "effect") node = document.querySelector(`.effect[data-effect="${def.id}"]`);
+    else if (def.kind === "module") node = document.querySelector(`[data-overlay-module="${def.id}"]`);
+    else node = $("star-section");
+    if (!node) return;
+    nodeParamsStash = { def, node, parent: node.parentNode, next: node.nextSibling };
+    $("node-params-title").textContent = def.label.toLowerCase();
+    $("node-params-body").appendChild(node);
+    if (node.classList.contains("effect")) node.classList.add("open");
+    $("node-params").hidden = false;
+  }
+
+  function closeNodeParams() {
+    if (nodeParamsStash) {
+      nodeParamsStash.parent.insertBefore(nodeParamsStash.node, nodeParamsStash.next);
+      nodeParamsStash = null;
+    }
+    $("node-params").hidden = true;
+  }
+
+  function updateWire() {
+    const v = $("node-view");
+    if (v.hidden) return;
+    const svg = $("node-wires");
+    const vr = v.getBoundingClientRect();
+    svg.setAttribute("viewBox", `0 0 ${vr.width} ${vr.height}`);
+    const s = $("node-stack").getBoundingClientRect();
+    const p = $("node-preview").getBoundingClientRect();
+    const x1 = s.right - vr.left, y1 = s.top + s.height / 2 - vr.top;
+    const x2 = p.left - vr.left, y2 = p.top + 24 - vr.top;
+    const dx = Math.max(50, (x2 - x1) / 2);
+    svg.innerHTML =
+      `<path d="M${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}"` +
+      ` stroke="#5a5a52" stroke-width="1.5" fill="none"/>` +
+      `<circle cx="${x1}" cy="${y1}" r="3.5" fill="#d6cbfa"/>` +
+      `<circle cx="${x2}" cy="${y2}" r="3.5" fill="#d6cbfa"/>`;
+  }
+
+  function makeNodeDraggable(card) {
+    const grip = card.querySelector(".node-drag");
+    if (!grip) return;
+    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    grip.addEventListener("pointerdown", (ev) => {
+      dragging = true;
+      grip.setPointerCapture(ev.pointerId);
+      sx = ev.clientX; sy = ev.clientY;
+      ox = card._x || 0; oy = card._y || 0;
+      ev.preventDefault();
+    });
+    grip.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      card._x = ox + ev.clientX - sx;
+      card._y = oy + ev.clientY - sy;
+      card.style.transform = `translate(${card._x}px, ${card._y}px)`;
+      updateWire();
+    });
+    for (const n of ["pointerup", "pointercancel"]) {
+      grip.addEventListener(n, () => { dragging = false; });
+    }
+  }
+
+  // background panning moves both cards together
+  (() => {
+    const v = $("node-view");
+    let panning = false, sx = 0, sy = 0, starts = null;
+    v.addEventListener("pointerdown", (ev) => {
+      if (ev.target !== v && ev.target.id !== "node-wires") return;
+      panning = true;
+      v.setPointerCapture(ev.pointerId);
+      sx = ev.clientX; sy = ev.clientY;
+      starts = [$("node-stack"), $("node-preview")].map((c) => [c, c._x || 0, c._y || 0]);
+    });
+    v.addEventListener("pointermove", (ev) => {
+      if (!panning) return;
+      for (const [c, x0, y0] of starts) {
+        c._x = x0 + ev.clientX - sx;
+        c._y = y0 + ev.clientY - sy;
+        c.style.transform = `translate(${c._x}px, ${c._y}px)`;
+      }
+      updateWire();
+    });
+    for (const n of ["pointerup", "pointercancel"]) {
+      v.addEventListener(n, () => { panning = false; });
+    }
+  })();
+
+  function enterNodeView() {
+    if (document.body.classList.contains("node-mode")) return;
+    closeSheet(true);
+    document.body.classList.add("node-mode");
+    $("node-view").hidden = false;
+    $("node-canvas-slot").appendChild(canvas);
+    renderNodeStack();
+    requestAnimationFrame(updateWire);
+  }
+
+  function exitNodeView() {
+    if (!document.body.classList.contains("node-mode")) return;
+    closeNodeParams();
+    $("node-add-menu").hidden = true;
+    document.body.classList.remove("node-mode");
+    $("node-view").hidden = true;
+    $("canvas-wrap").appendChild(canvas);
+  }
+
+  $("node-toggle").addEventListener("click", enterNodeView);
+  $("node-exit").addEventListener("click", exitNodeView);
+  $("node-params-close").addEventListener("click", closeNodeParams);
+  $("node-add").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const menu = $("node-add-menu");
+    if (menu.hidden) { buildNodeAddMenu(); menu.hidden = false; }
+    else menu.hidden = true;
+  });
+  $("nv-seed").addEventListener("click", () => $("reroll-btn").click());
+  $("nv-rand").addEventListener("click", () => {
+    $("random-btn").click();
+    renderNodeStack();
+  });
+  $("nv-png").addEventListener("click", () => $("download-btn").click());
+  $("nv-svg").addEventListener("click", () => $("svg-btn").click());
+  $("nv-export").addEventListener("click", () => {
+    if (mode === "video") $("export-video-btn").click();
+    else if (mode === "live") toggleLiveRecord();
+  });
+  makeNodeDraggable($("node-stack"));
+  makeNodeDraggable($("node-preview"));
+  window.addEventListener("resize", () => {
+    if (window.innerWidth <= 940) exitNodeView();
+    updateWire();
+  });
+  document.addEventListener("change", (ev) => {
+    if (ev.target && ev.target.classList && ev.target.classList.contains("effect-toggle")) {
+      renderNodeStack();
+    }
+  });
 
   buildControls();
   buildOverlayList();
