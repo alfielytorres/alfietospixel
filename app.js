@@ -1782,6 +1782,13 @@
     return out;
   }
 
+  function pickFile(accept) {
+    const inp = $("file-input");
+    inp.setAttribute("accept", accept);
+    inp.value = "";
+    inp.click();
+  }
+
   function nvBtn(label, fn) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "nbtn"; b.textContent = label;
@@ -1845,9 +1852,22 @@
         if (base) thumb.getContext("2d").putImageData(applyUpTo(base, list, i), 0, 0);
 
         if (n.kind === "source") {
-          card.addEventListener("click", (ev) => {
-            if (!ev.target.closest("button")) $("file-input").click();
-          });
+          const tabs = document.createElement("div");
+          tabs.className = "node-source-tabs";
+          const mk = (label, active, fn) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "src-tab" + (active ? " active" : "");
+            b.textContent = label;
+            b.addEventListener("click", (ev) => { ev.stopPropagation(); fn(); });
+            return b;
+          };
+          tabs.append(
+            mk("photo", mode === "image", () => pickFile("image/*,.heic,.heif")),
+            mk("video", mode === "video", () => pickFile("video/*")),
+            mk("live", mode === "live", () => startLive()),
+          );
+          card.appendChild(tabs);
         } else {
           const x = document.createElement("button");
           x.className = "node-x node-card-x"; x.type = "button"; x.textContent = "×";

@@ -747,6 +747,16 @@ body.node-mode #node-view { display: block; }
   cursor: grab;
 }
 .node-card-x { position: absolute; top: 7px; right: 8px; opacity: 0; transition: opacity .12s; z-index: 2; }
+.node-source-tabs { display: flex; gap: 4px; padding: 0 10px 10px; }
+.src-tab {
+  flex: 1;
+  font: 500 .64rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+  text-transform: lowercase;
+  background: #1d1d1a; border: 1px solid #2c2c28; color: #b9b8b2;
+  border-radius: 5px; padding: .5em 0; cursor: pointer;
+}
+.src-tab:hover { border-color: var(--lavender); color: var(--lavender); }
+.src-tab.active { background: var(--lavender); color: #131311; border-color: var(--lavender); }
 .node-card:hover .node-card-x { opacity: 1; }
 
 .node-plus {
