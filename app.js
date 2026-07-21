@@ -157,7 +157,7 @@
       $("export-video-btn").textContent =
         `REC ${videoEl.currentTime.toFixed(1)}S / ${clipEnd.toFixed(1)}S`;
     }
-    if (document.body.classList.contains("node-mode") && performance.now() - lastLoopThumb > 350) {
+    if (nodeVisible() && performance.now() - lastLoopThumb > 350) {
       lastLoopThumb = performance.now(); refreshThumbs();
     }
     vidRaf = requestAnimationFrame(videoLoop);
@@ -233,7 +233,7 @@
     $("flip-btn").hidden = !isLive;
     $("ab-flip").hidden = !isLive;
     $("ab-export").textContent = isLive ? "RECORD" : "EXPORT";
-    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+    if (nodeVisible()) renderNodeGraph();
   }
 
   function cleanupVideo() {
@@ -356,7 +356,7 @@
       $("ab-export").textContent = "STOP " + el.toFixed(0) + "S";
       if (el >= MAX_LIVE_SECONDS) stopLiveRecord();
     }
-    if (document.body.classList.contains("node-mode") && performance.now() - lastLoopThumb > 350) {
+    if (nodeVisible() && performance.now() - lastLoopThumb > 350) {
       lastLoopThumb = performance.now(); refreshThumbs();
     }
     liveRaf = requestAnimationFrame(liveLoop);
@@ -576,7 +576,7 @@
     audioTick();
     toast("audio attached — effects now react to the beat", 3200);
     if (mode === "image") render();
-    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+    if (nodeVisible()) renderNodeGraph();
   }
 
   function loadFile(file) {
@@ -1368,7 +1368,7 @@
     chain.dither.params.pixelSize = Math.min(chain.dither.params.pixelSize, 8);
     syncControls();
     render();
-    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+    if (nodeVisible()) renderNodeGraph();
   }
 
   function resetAll() {
@@ -1568,7 +1568,7 @@
     document.querySelectorAll("#looks-bar .look").forEach((el) =>
       el.classList.toggle("active", el.dataset.look === name));
     render();
-    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+    if (nodeVisible()) renderNodeGraph();
   }
 
   function buildLooks() {
@@ -1879,8 +1879,14 @@
     renderNodeGraph();
   }
 
+  function nodeVisible() {
+    const b = document.body.classList;
+    return b.contains("node-mode") || b.contains("node-docked");
+  }
+  function nodeDocked() { return document.body.classList.contains("node-docked"); }
+
   function renderNodeGraph() {
-    if (!document.body.classList.contains("node-mode")) return;
+    if (!nodeVisible()) return;
     const graph = $("node-graph");
     graph.innerHTML = "";
     const list = pipeline();
@@ -1898,7 +1904,16 @@
       if (n.kind === "result") {
         const slot = document.createElement("div");
         slot.className = "node-result-slot";
-        slot.appendChild(canvas);
+        if (nodeDocked()) {
+          // docked: the live canvas stays in the preview; show a thumbnail here
+          const t = document.createElement("canvas");
+          t.className = "node-thumb";
+          t.width = 150; t.height = canvas.width ? Math.max(40, Math.round(150 * canvas.height / canvas.width)) : 100;
+          try { if (canvas.width) t.getContext("2d").drawImage(canvas, 0, 0, t.width, t.height); } catch { /* not ready */ }
+          slot.appendChild(t);
+        } else {
+          slot.appendChild(canvas);
+        }
         card.appendChild(slot);
         const acts = document.createElement("div");
         acts.className = "node-actions";
@@ -2110,7 +2125,7 @@
 
   // refresh node thumbnails without rebuilding the layout
   function refreshThumbs() {
-    if (!document.body.classList.contains("node-mode")) return;
+    if (!nodeVisible()) return;
     const list = pipeline();
     const base = thumbBase();
     if (!base) return;
@@ -2118,41 +2133,63 @@
     cards.forEach((card, i) => {
       const th = card.querySelector(".node-thumb");
       if (!th) return;
+      if (card.classList.contains("node-result")) {
+        // docked live result thumbnail — mirror the preview canvas
+        try { if (canvas.width) th.getContext("2d").drawImage(canvas, 0, 0, th.width, th.height); } catch { /* not ready */ }
+        return;
+      }
       if (th.height !== base.height) th.height = base.height;
       th.getContext("2d").putImageData(applyUpTo(base, list, i), 0, 0);
     });
   }
   function scheduleThumbs() {
-    if (!document.body.classList.contains("node-mode")) return;
+    if (!nodeVisible()) return;
     clearTimeout(thumbTimer);
     thumbTimer = setTimeout(refreshThumbs, 140);
   }
 
-  function enterNodeView() {
-    closeSheet(true);
-    document.body.classList.add("node-mode");
-    $("node-view").hidden = false;
-    renderNodeGraph();          // this moves the canvas into the result node
-    requestAnimationFrame(updateWires);
-    // installed / fullscreen PWAs can request landscape; harmless elsewhere
-    try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {}); } catch { /* ignore */ }
+  // Three studio modes share one canvas:
+  //  editor  → canvas in the preview, effects panel hidden
+  //  docked  → editor visible, effects panel docked above the timeline
+  //            (preview keeps the canvas; the result node shows a thumbnail)
+  //  full    → full-screen node view (canvas moves into the result node)
+  function setStudioMode(m) {
+    const body = document.body.classList;
+    closeSheet(true); closeNodeParams(); $("node-add-menu").hidden = true;
+    if (m === "editor") {
+      body.remove("node-mode"); body.remove("node-docked"); body.add("editor-mode");
+      $("node-view").hidden = true; $("workspace").appendChild($("node-view"));
+      $("editor-view").hidden = false;
+      $("ev-preview").appendChild(canvas);
+      requestAnimationFrame(() => { buildRuler(); renderTimeline(); renderComposite(); });
+    } else if (m === "docked") {
+      body.remove("node-mode"); body.add("editor-mode"); body.add("node-docked");
+      $("editor-view").hidden = false;
+      $("ev-preview").appendChild(canvas);                       // preview keeps the canvas
+      $("editor-view").insertBefore($("node-view"), $("timeline"));
+      $("node-view").hidden = false;
+      renderNodeGraph();
+      requestAnimationFrame(() => { renderTimeline(); renderComposite(); layoutNodes(); });
+    } else { // full
+      body.remove("editor-mode"); body.remove("node-docked"); body.add("node-mode");
+      $("editor-view").hidden = true;
+      $("workspace").appendChild($("node-view"));
+      $("node-view").hidden = false;
+      renderNodeGraph();                                          // moves canvas into the result node
+      requestAnimationFrame(updateWires);
+      try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {}); } catch { /* ignore */ }
+    }
   }
-  function exitNodeView() {
-    if (!document.body.classList.contains("node-mode")) return;
-    closeNodeParams();
-    $("node-add-menu").hidden = true;
-    document.body.classList.remove("node-mode");
-    $("node-view").hidden = true;
-    $("canvas-wrap").appendChild(canvas);
-  }
+  function enterNodeView() { setStudioMode("full"); }
+  function exitNodeView() { if (nodeVisible()) setStudioMode("editor"); }
 
   $("node-params-close").addEventListener("click", closeNodeParams);
   $("node-backdrop").addEventListener("click", closeNodeParams);
   window.addEventListener("resize", () => {
-    if (document.body.classList.contains("node-mode")) layoutNodes();
+    if (nodeVisible()) layoutNodes();
   });
   window.addEventListener("orientationchange", () => {
-    if (document.body.classList.contains("node-mode")) setTimeout(layoutNodes, 250);
+    if (nodeVisible()) setTimeout(layoutNodes, 250);
   });
   document.addEventListener("change", (ev) => {
     if (ev.target && ev.target.classList && ev.target.classList.contains("effect-toggle")) {
@@ -2505,7 +2542,7 @@
     TL.sel = c.id;
     renderTimeline();
     renderComposite();
-    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+    if (nodeVisible()) renderNodeGraph();
   }
 
   function hasVisual() { return TL.clips.some((c) => c.kind === "image" || c.kind === "video"); }
@@ -2629,7 +2666,7 @@
     TL.clips = TL.clips.filter((x) => x.id !== TL.sel);
     TL.sel = null;
     renderTimeline(); renderComposite();
-    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+    if (nodeVisible()) renderNodeGraph();
   }
 
   // ---- timeline interactions: select, drag, trim, scrub ----
@@ -2918,18 +2955,8 @@
     }, { passive: false });
   })();
 
-  function enterEditor() {
-    document.body.classList.remove("node-mode");
-    document.body.classList.add("editor-mode");
-    $("node-view").hidden = true;
-    $("editor-view").hidden = false;
-    $("ev-preview").appendChild(canvas);
-    requestAnimationFrame(() => { buildRuler(); renderTimeline(); renderComposite(); });
-  }
-  function editorToEffects() {
-    document.body.classList.remove("editor-mode");
-    enterNodeView();
-  }
+  function enterEditor() { setStudioMode("editor"); }
+  function editorToEffects() { setStudioMode("docked"); }
   async function tlExport(targetW, targetH) {
     if (!TL.clips.length || TL._exporting) return;
     TL._exporting = true;
@@ -3027,6 +3054,9 @@
 
   $("to-effects").addEventListener("click", editorToEffects);
   $("to-editor").addEventListener("click", enterEditor);
+  $("node-expand").addEventListener("click", () => setStudioMode("full"));
+  $("node-close").addEventListener("click", () => setStudioMode("editor"));
+  $("node-dock").addEventListener("click", () => setStudioMode("docked"));
   window.addEventListener("resize", () => { if (document.body.classList.contains("editor-mode")) { buildRuler(); renderTimeline(); } });
 
 
