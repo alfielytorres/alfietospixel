@@ -105,33 +105,16 @@
 
     <section id="node-view" hidden>
       <svg id="node-wires" aria-hidden="true"></svg>
-      <div id="node-stack" class="node-card">
-        <div class="node-drag node-title">stack · effects</div>
-        <div id="node-rows"></div>
-        <div class="node-add-wrap">
-          <button id="node-add" class="nbtn" type="button">+ add</button>
-          <div id="node-add-menu" class="node-add-menu" hidden></div>
-        </div>
-      </div>
-      <div id="node-preview" class="node-card">
-        <div class="node-drag node-title">preview · 1:1</div>
-        <div id="node-canvas-slot"></div>
-        <div class="node-actions">
-          <button class="nbtn" id="nv-seed" type="button">seed</button>
-          <button class="nbtn" id="nv-rand" type="button">random</button>
-          <button class="nbtn" id="nv-png" type="button">png</button>
-          <button class="nbtn" id="nv-svg" type="button">svg</button>
-          <button class="nbtn nbtn-primary" id="nv-export" type="button" hidden>export</button>
-        </div>
-      </div>
+      <div id="node-graph"></div>
       <div id="node-params" class="node-card" hidden>
-        <div class="node-title node-params-head">
+        <div class="node-title node-params-head node-drag">
           <span id="node-params-title"></span>
           <button id="node-params-close" class="node-x" type="button">×</button>
         </div>
         <div id="node-params-body"></div>
       </div>
-      <button id="node-exit" class="nbtn node-exit" type="button">← list view</button>
+      <div id="node-add-menu" class="node-add-menu" hidden></div>
+      <button id="node-exit" class="nbtn node-exit" type="button">list view</button>
     </section>
   </section>
 </main>

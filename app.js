@@ -80,6 +80,7 @@
       canvas.width = out.width;
       canvas.height = out.height;
       ctx.putImageData(out, 0, 0);
+      scheduleThumbs();
     });
   }
 
@@ -123,6 +124,9 @@
       $("export-video-btn").textContent =
         `REC ${videoEl.currentTime.toFixed(1)}S / ${clipEnd.toFixed(1)}S`;
     }
+    if (document.body.classList.contains("node-mode") && performance.now() - lastLoopThumb > 350) {
+      lastLoopThumb = performance.now(); refreshThumbs();
+    }
     vidRaf = requestAnimationFrame(videoLoop);
   }
 
@@ -157,6 +161,9 @@
     firstRunTip();
     thumbsStale = true;
     if (mode === "image") { thumbsStale = false; renderLookThumbs(); }
+    // node view is the default editing surface on desktop
+    if (window.innerWidth > 940) enterNodeView();
+    else exitNodeView();
   }
 
   function toast(msg, ms) {
@@ -176,7 +183,10 @@
     try { seen = localStorage.getItem("versions-eye-tip"); } catch { /* private mode */ }
     if (seen) return;
     try { localStorage.setItem("versions-eye-tip", "1"); } catch { /* ignore */ }
-    setTimeout(() => toast("tap a look below · hold for original · reroll for a new glitch", 4200), 600);
+    const tip = window.innerWidth > 940
+      ? "click + to add a filter · click a node to edit · drag to rearrange"
+      : "tap a look · tap a tool chip to edit · export from the bar";
+    setTimeout(() => toast(tip, 4200), 700);
   }
 
   function updateModeUI() {
@@ -192,8 +202,7 @@
     $("flip-btn").hidden = !isLive;
     $("ab-flip").hidden = !isLive;
     $("ab-export").textContent = isLive ? "RECORD" : "EXPORT";
-    $("nv-export").hidden = !(isVideo || isLive);
-    $("nv-export").textContent = isLive ? "record" : "export mov";
+    if (document.body.classList.contains("node-mode")) renderNodeGraph();
   }
 
   function cleanupVideo() {
@@ -316,6 +325,9 @@
       $("record-btn").textContent = label;
       $("ab-export").textContent = "STOP " + el.toFixed(0) + "S";
       if (el >= MAX_LIVE_SECONDS) stopLiveRecord();
+    }
+    if (document.body.classList.contains("node-mode") && performance.now() - lastLoopThumb > 350) {
+      lastLoopThumb = performance.now(); refreshThumbs();
     }
     liveRaf = requestAnimationFrame(liveLoop);
   }
@@ -1282,6 +1294,7 @@
     chain.dither.params.pixelSize = Math.min(chain.dither.params.pixelSize, 8);
     syncControls();
     render();
+    if (document.body.classList.contains("node-mode")) renderNodeGraph();
   }
 
   function resetAll() {
@@ -1347,6 +1360,7 @@
   $("export-video-btn").addEventListener("click", exportVideo);
   $("new-image-btn").addEventListener("click", () => {
     document.body.classList.remove("in-app");
+    exitNodeView();
     cleanupVideo();
     cleanupLive();
     mode = "image";
@@ -1475,6 +1489,7 @@
     document.querySelectorAll("#looks-bar .look").forEach((el) =>
       el.classList.toggle("active", el.dataset.look === name));
     render();
+    if (document.body.classList.contains("node-mode")) renderNodeGraph();
   }
 
   function buildLooks() {
@@ -1686,18 +1701,20 @@
   }
 
   // =====================================================================
-  // node view — sketchdesign-style workspace: the enabled effects as a
-  // stack of node rows wired to a draggable preview card on a dark grid
+  // node view — sketchdesign-style pipeline: source → filter → … → result.
+  // one node per filter, wired left to right on a dark dotted canvas; each
+  // node shows a live thumbnail of the image up to and including that step.
   // =====================================================================
 
   let nodeParamsStash = null;
+  const nodePos = {};   // id -> { bx, by, dx, dy }  base layout + drag offset
+  let thumbTimer = 0, lastLoopThumb = 0;
 
   const NODE_DEFS = () => [
     ...Effects.REGISTRY.map((e) => ({ id: e.id, label: e.name, kind: "effect" })),
     { id: "orbs", label: "ORBS", kind: "module" },
     { id: "lines", label: "LINES", kind: "module" },
   ];
-
   function nodeEnabled(def) {
     return def.kind === "effect" ? chain[def.id].enabled : overlayModules[def.id].enabled;
   }
@@ -1713,83 +1730,275 @@
     if (box) box.classList.toggle("enabled", on);
   }
 
-  function renderNodeStack() {
-    if (!document.body.classList.contains("node-mode")) return;
-    const rows = $("node-rows");
-    rows.innerHTML = "";
-    let any = false;
-    for (const def of NODE_DEFS()) {
-      if (!nodeEnabled(def)) continue;
-      any = true;
-      const row = document.createElement("div");
-      row.className = "node-row";
-      const dot = document.createElement("span");
-      dot.className = "dot";
-      const name = document.createElement("span");
-      name.className = "node-name";
-      name.textContent = def.label;
-      const x = document.createElement("button");
-      x.className = "node-x";
-      x.type = "button";
-      x.textContent = "×";
-      x.setAttribute("aria-label", `remove ${def.label}`);
-      x.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        setNodeEnabled(def, false);
-        if (nodeParamsStash && nodeParamsStash.def.id === def.id) closeNodeParams();
-        renderNodeStack();
-        updateChips();
-        render();
-        requestAnimationFrame(updateWire);
-      });
-      row.append(dot, name, x);
-      row.addEventListener("click", () => openNodeParams(def));
-      rows.appendChild(row);
+  // the ordered pipeline: source, then each enabled step, then result
+  function pipeline() {
+    const list = [{ id: "__source", kind: "source", label: "source" }];
+    for (const e of Effects.REGISTRY) {
+      if (chain[e.id].enabled) list.push({ id: e.id, kind: "effect", label: e.name });
     }
-    if (stars.length) {
-      any = true;
-      const row = document.createElement("div");
-      row.className = "node-row";
-      row.innerHTML = `<span class="dot"></span><span class="node-name">stars (${stars.length})</span>`;
-      row.addEventListener("click", () => openNodeParams({ id: "stars", label: "STARS", kind: "stars" }));
-      rows.appendChild(row);
-    }
-    if (!any) {
-      const empty = document.createElement("div");
-      empty.className = "node-row-empty";
-      empty.textContent = "empty stack — add an effect";
-      rows.appendChild(empty);
-    }
-    requestAnimationFrame(updateWire);
+    if (overlayModules.orbs.enabled) list.push({ id: "orbs", kind: "module", label: "ORBS" });
+    if (overlayModules.lines.enabled) list.push({ id: "lines", kind: "module", label: "LINES" });
+    if (stars.length) list.push({ id: "__stars", kind: "stars", label: `stars (${stars.length})` });
+    list.push({ id: "__result", kind: "result", label: "result" });
+    return list;
   }
 
-  function buildNodeAddMenu() {
+  // small copy of the current source/frame to render node thumbnails on
+  function thumbBase() {
+    let sw, sh;
+    if (mode === "image" && sourceImage) { sw = sourceImage.width; sh = sourceImage.height; }
+    else if (vidCanvas.width > 1) { sw = vidCanvas.width; sh = vidCanvas.height; }
+    else return null;
+    const W = 150, H = Math.max(1, Math.round(W * sh / sw));
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    if (mode === "image") {
+      const s = document.createElement("canvas"); s.width = sw; s.height = sh;
+      s.getContext("2d").putImageData(sourceImage, 0, 0);
+      g.drawImage(s, 0, 0, W, H);
+    } else {
+      g.drawImage(vidCanvas, 0, 0, W, H);
+    }
+    return g.getImageData(0, 0, W, H);
+  }
+
+  // apply the pipeline up to (and including) list index k onto src
+  function applyUpTo(src, list, k) {
+    const c = {};
+    for (const e of Effects.REGISTRY) c[e.id] = { enabled: false, params: chain[e.id].params };
+    const m = {
+      orbs: { enabled: false, params: overlayModules.orbs.params },
+      lines: { enabled: false, params: overlayModules.lines.params },
+    };
+    let useStars = false;
+    for (let i = 1; i <= k; i++) {
+      const n = list[i];
+      if (n.kind === "effect") c[n.id].enabled = true;
+      else if (n.kind === "module") m[n.id].enabled = true;
+      else if (n.kind === "stars") useStars = true;
+    }
+    let out = Effects.apply(src, c, seed);
+    out = Effects.renderOverlayStack(out, m, useStars ? stars : [], false);
+    return out;
+  }
+
+  function nvBtn(label, fn) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "nbtn"; b.textContent = label;
+    b.addEventListener("click", (ev) => { ev.stopPropagation(); fn(); });
+    return b;
+  }
+
+  function removeNode(n) {
+    if (n.kind === "effect") setNodeEnabled({ id: n.id, kind: "effect" }, false);
+    else if (n.kind === "module") setNodeEnabled({ id: n.id, kind: "module" }, false);
+    else if (n.kind === "stars") { stars = []; buildStarList(); }
+    if (nodeParamsStash && nodeParamsStash.def.id === n.id) closeNodeParams();
+    updateChips();
+    render();
+    renderNodeGraph();
+  }
+
+  function renderNodeGraph() {
+    if (!document.body.classList.contains("node-mode")) return;
+    const graph = $("node-graph");
+    graph.innerHTML = "";
+    const list = pipeline();
+    const base = thumbBase();
+    list.forEach((n, i) => {
+      const card = document.createElement("div");
+      card.className = "node-card node-" + n.kind;
+      card.dataset.nid = n.id;
+
+      const title = document.createElement("div");
+      title.className = "node-title node-drag";
+      title.textContent = n.kind === "result" ? "result · 1:1" : n.label.toLowerCase();
+      card.appendChild(title);
+
+      if (n.kind === "result") {
+        const slot = document.createElement("div");
+        slot.className = "node-result-slot";
+        slot.appendChild(canvas);
+        card.appendChild(slot);
+        const acts = document.createElement("div");
+        acts.className = "node-actions";
+        acts.append(
+          nvBtn("seed", () => { $("reroll-btn").click(); }),
+          nvBtn("random", () => { $("random-btn").click(); }),
+          nvBtn("png", () => $("download-btn").click()),
+          nvBtn("svg", () => $("svg-btn").click()),
+        );
+        if (mode === "video" || mode === "live") {
+          const exp = nvBtn(mode === "live" ? "record" : "export mov", () => {
+            if (mode === "video") $("export-video-btn").click();
+            else toggleLiveRecord();
+          });
+          exp.classList.add("nbtn-primary");
+          acts.appendChild(exp);
+        }
+        card.appendChild(acts);
+      } else {
+        const thumb = document.createElement("canvas");
+        thumb.className = "node-thumb";
+        thumb.width = 150; thumb.height = base ? base.height : 100;
+        card.appendChild(thumb);
+        if (base) thumb.getContext("2d").putImageData(applyUpTo(base, list, i), 0, 0);
+
+        if (n.kind === "source") {
+          card.addEventListener("click", (ev) => {
+            if (!ev.target.closest("button")) $("file-input").click();
+          });
+        } else {
+          const x = document.createElement("button");
+          x.className = "node-x node-card-x"; x.type = "button"; x.textContent = "×";
+          x.setAttribute("aria-label", `remove ${n.label}`);
+          x.addEventListener("click", (ev) => { ev.stopPropagation(); removeNode(n); });
+          card.appendChild(x);
+          card.addEventListener("click", (ev) => {
+            if (!ev.target.closest("button")) openNodeParams(n);
+          });
+        }
+      }
+
+      if (n.kind !== "result") {
+        const plus = document.createElement("button");
+        plus.className = "node-plus"; plus.type = "button"; plus.textContent = "+";
+        plus.setAttribute("aria-label", "add filter");
+        plus.addEventListener("click", (ev) => { ev.stopPropagation(); toggleAddMenu(plus); });
+        card.appendChild(plus);
+      }
+
+      makeCardDraggable(card, n.kind === "result");
+      graph.appendChild(card);
+    });
+    layoutNodes();
+  }
+
+  function layoutNodes() {
+    const graph = $("node-graph");
+    const cards = [...graph.children];
+    const midY = graph.clientHeight / 2;
+    let x = 44;
+    for (const card of cards) {
+      const id = card.dataset.nid;
+      const p = nodePos[id] || (nodePos[id] = { dx: 0, dy: 0 });
+      const w = card.offsetWidth, h = card.offsetHeight;
+      p.bx = x; p.by = midY - h / 2;
+      card.style.left = (p.bx + p.dx) + "px";
+      card.style.top = (p.by + p.dy) + "px";
+      x += w + 74;
+    }
+    requestAnimationFrame(updateWires);
+  }
+
+  function updateWires() {
+    const v = $("node-view");
+    if (v.hidden) return;
+    const vr = v.getBoundingClientRect();
+    const svg = $("node-wires");
+    svg.setAttribute("viewBox", `0 0 ${vr.width} ${vr.height}`);
+    const cards = [...$("node-graph").children];
+    let paths = "", dots = "";
+    for (let i = 0; i < cards.length - 1; i++) {
+      const a = cards[i].getBoundingClientRect(), b = cards[i + 1].getBoundingClientRect();
+      const x1 = a.right - vr.left, y1 = a.top + a.height / 2 - vr.top;
+      const x2 = b.left - vr.left, y2 = b.top + b.height / 2 - vr.top;
+      const dx = Math.max(28, (x2 - x1) / 2);
+      paths += `M${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2} `;
+      dots += `<circle cx="${x1}" cy="${y1}" r="3.5" fill="#d6cbfa"/><circle cx="${x2}" cy="${y2}" r="3.5" fill="#d6cbfa"/>`;
+    }
+    svg.innerHTML = `<path d="${paths}" stroke="#4a4a44" stroke-width="1.5" fill="none"/>${dots}`;
+  }
+
+  function makeCardDraggable(card, byTitleOnly) {
+    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    card.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest("button, input, select, textarea, .node-actions")) return;
+      if (byTitleOnly && !ev.target.closest(".node-title")) return;
+      const id = card.dataset.nid;
+      const p = nodePos[id] || (nodePos[id] = { dx: 0, dy: 0, bx: 0, by: 0 });
+      dragging = true;
+      card.setPointerCapture(ev.pointerId);
+      sx = ev.clientX; sy = ev.clientY; ox = p.dx; oy = p.dy;
+      card.style.zIndex = 5;
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+    card.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      const p = nodePos[card.dataset.nid];
+      p.dx = ox + ev.clientX - sx;
+      p.dy = oy + ev.clientY - sy;
+      card.style.left = (p.bx + p.dx) + "px";
+      card.style.top = (p.by + p.dy) + "px";
+      updateWires();
+    });
+    for (const n of ["pointerup", "pointercancel"]) {
+      card.addEventListener(n, () => { dragging = false; });
+    }
+  }
+
+  // pan the whole graph by dragging empty canvas
+  (() => {
+    const v = $("node-view");
+    let panning = false, sx = 0, sy = 0, starts = null;
+    v.addEventListener("pointerdown", (ev) => {
+      if (ev.target !== v && ev.target.id !== "node-wires" && ev.target.id !== "node-graph") return;
+      panning = true;
+      v.setPointerCapture(ev.pointerId);
+      sx = ev.clientX; sy = ev.clientY;
+      starts = [...$("node-graph").children].map((c) => {
+        const p = nodePos[c.dataset.nid]; return [c, p.dx, p.dy];
+      });
+    });
+    v.addEventListener("pointermove", (ev) => {
+      if (!panning) return;
+      for (const [c, x0, y0] of starts) {
+        const p = nodePos[c.dataset.nid];
+        p.dx = x0 + ev.clientX - sx; p.dy = y0 + ev.clientY - sy;
+        c.style.left = (p.bx + p.dx) + "px"; c.style.top = (p.by + p.dy) + "px";
+      }
+      updateWires();
+    });
+    for (const n of ["pointerup", "pointercancel"]) v.addEventListener(n, () => { panning = false; });
+  })();
+
+  function toggleAddMenu(anchor) {
     const menu = $("node-add-menu");
+    if (!menu.hidden && menu._anchor === anchor) { menu.hidden = true; return; }
     menu.innerHTML = "";
+    let hasAny = false;
     for (const def of NODE_DEFS()) {
       if (nodeEnabled(def)) continue;
+      hasAny = true;
       const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = def.label;
+      b.type = "button"; b.textContent = def.label.toLowerCase();
       b.addEventListener("click", () => {
         setNodeEnabled(def, true);
         menu.hidden = true;
-        renderNodeStack();
         updateChips();
         render();
+        renderNodeGraph();
         openNodeParams(def);
       });
       menu.appendChild(b);
     }
     const star = document.createElement("button");
-    star.type = "button";
-    star.textContent = "+ star overlay";
+    star.type = "button"; star.textContent = "+ star overlay";
     star.addEventListener("click", () => {
       menu.hidden = true;
       addStar();
-      renderNodeStack();
+      renderNodeGraph();
     });
     menu.appendChild(star);
+    if (!hasAny && !stars.length) { /* still show star option */ }
+
+    const v = $("node-view").getBoundingClientRect();
+    const a = anchor.getBoundingClientRect();
+    menu.style.left = (a.right - v.left + 8) + "px";
+    menu.style.top = (a.top - v.top) + "px";
+    menu._anchor = anchor;
+    menu.hidden = false;
   }
 
   function openNodeParams(def) {
@@ -1800,12 +2009,11 @@
     else node = $("star-section");
     if (!node) return;
     nodeParamsStash = { def, node, parent: node.parentNode, next: node.nextSibling };
-    $("node-params-title").textContent = def.label.toLowerCase();
+    $("node-params-title").textContent = (def.kind === "stars" ? "stars" : def.label).toLowerCase();
     $("node-params-body").appendChild(node);
     if (node.classList.contains("effect")) node.classList.add("open");
     $("node-params").hidden = false;
   }
-
   function closeNodeParams() {
     if (nodeParamsStash) {
       nodeParamsStash.parent.insertBefore(nodeParamsStash.node, nodeParamsStash.next);
@@ -1814,83 +2022,33 @@
     $("node-params").hidden = true;
   }
 
-  function updateWire() {
-    const v = $("node-view");
-    if (v.hidden) return;
-    const svg = $("node-wires");
-    const vr = v.getBoundingClientRect();
-    svg.setAttribute("viewBox", `0 0 ${vr.width} ${vr.height}`);
-    const s = $("node-stack").getBoundingClientRect();
-    const p = $("node-preview").getBoundingClientRect();
-    const x1 = s.right - vr.left, y1 = s.top + s.height / 2 - vr.top;
-    const x2 = p.left - vr.left, y2 = p.top + 24 - vr.top;
-    const dx = Math.max(50, (x2 - x1) / 2);
-    svg.innerHTML =
-      `<path d="M${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}"` +
-      ` stroke="#5a5a52" stroke-width="1.5" fill="none"/>` +
-      `<circle cx="${x1}" cy="${y1}" r="3.5" fill="#d6cbfa"/>` +
-      `<circle cx="${x2}" cy="${y2}" r="3.5" fill="#d6cbfa"/>`;
+  // refresh node thumbnails without rebuilding the layout
+  function refreshThumbs() {
+    if (!document.body.classList.contains("node-mode")) return;
+    const list = pipeline();
+    const base = thumbBase();
+    if (!base) return;
+    const cards = [...$("node-graph").children];
+    cards.forEach((card, i) => {
+      const th = card.querySelector(".node-thumb");
+      if (!th) return;
+      if (th.height !== base.height) th.height = base.height;
+      th.getContext("2d").putImageData(applyUpTo(base, list, i), 0, 0);
+    });
   }
-
-  function makeNodeDraggable(card, wholeCard) {
-    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-    card.addEventListener("pointerdown", (ev) => {
-      // controls stay interactive; everything else on the card drags it
-      if (ev.target.closest("button, input, select, textarea, canvas, .node-row, .node-add-menu")) return;
-      if (!wholeCard && !ev.target.closest(".node-title")) return;
-      dragging = true;
-      card.setPointerCapture(ev.pointerId);
-      sx = ev.clientX; sy = ev.clientY;
-      ox = card._x || 0; oy = card._y || 0;
-      ev.preventDefault();
-    });
-    card.addEventListener("pointermove", (ev) => {
-      if (!dragging) return;
-      card._x = ox + ev.clientX - sx;
-      card._y = oy + ev.clientY - sy;
-      card.style.transform = `translate(${card._x}px, ${card._y}px)`;
-      updateWire();
-    });
-    for (const n of ["pointerup", "pointercancel"]) {
-      card.addEventListener(n, () => { dragging = false; });
-    }
+  function scheduleThumbs() {
+    if (!document.body.classList.contains("node-mode")) return;
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(refreshThumbs, 140);
   }
-
-  // background panning moves both cards together
-  (() => {
-    const v = $("node-view");
-    let panning = false, sx = 0, sy = 0, starts = null;
-    v.addEventListener("pointerdown", (ev) => {
-      if (ev.target !== v && ev.target.id !== "node-wires") return;
-      panning = true;
-      v.setPointerCapture(ev.pointerId);
-      sx = ev.clientX; sy = ev.clientY;
-      starts = [$("node-stack"), $("node-preview")].map((c) => [c, c._x || 0, c._y || 0]);
-    });
-    v.addEventListener("pointermove", (ev) => {
-      if (!panning) return;
-      for (const [c, x0, y0] of starts) {
-        c._x = x0 + ev.clientX - sx;
-        c._y = y0 + ev.clientY - sy;
-        c.style.transform = `translate(${c._x}px, ${c._y}px)`;
-      }
-      updateWire();
-    });
-    for (const n of ["pointerup", "pointercancel"]) {
-      v.addEventListener(n, () => { panning = false; });
-    }
-  })();
 
   function enterNodeView() {
-    if (document.body.classList.contains("node-mode")) return;
     closeSheet(true);
     document.body.classList.add("node-mode");
     $("node-view").hidden = false;
-    $("node-canvas-slot").appendChild(canvas);
-    renderNodeStack();
-    requestAnimationFrame(updateWire);
+    renderNodeGraph();          // this moves the canvas into the result node
+    requestAnimationFrame(updateWires);
   }
-
   function exitNodeView() {
     if (!document.body.classList.contains("node-mode")) return;
     closeNodeParams();
@@ -1903,33 +2061,14 @@
   $("node-toggle").addEventListener("click", enterNodeView);
   $("node-exit").addEventListener("click", exitNodeView);
   $("node-params-close").addEventListener("click", closeNodeParams);
-  $("node-add").addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    const menu = $("node-add-menu");
-    if (menu.hidden) { buildNodeAddMenu(); menu.hidden = false; }
-    else menu.hidden = true;
-  });
-  $("nv-seed").addEventListener("click", () => $("reroll-btn").click());
-  $("nv-rand").addEventListener("click", () => {
-    $("random-btn").click();
-    renderNodeStack();
-  });
-  $("nv-png").addEventListener("click", () => $("download-btn").click());
-  $("nv-svg").addEventListener("click", () => $("svg-btn").click());
-  $("nv-export").addEventListener("click", () => {
-    if (mode === "video") $("export-video-btn").click();
-    else if (mode === "live") toggleLiveRecord();
-  });
-  makeNodeDraggable($("node-stack"), true);
-  makeNodeDraggable($("node-preview"), true);
-  makeNodeDraggable($("node-params"), false); // by its title bar
+  makeCardDraggable($("node-params"), true);
   window.addEventListener("resize", () => {
     if (window.innerWidth <= 940) exitNodeView();
-    updateWire();
+    else if (document.body.classList.contains("node-mode")) layoutNodes();
   });
   document.addEventListener("change", (ev) => {
     if (ev.target && ev.target.classList && ev.target.classList.contains("effect-toggle")) {
-      renderNodeStack();
+      renderNodeGraph();
     }
   });
 
