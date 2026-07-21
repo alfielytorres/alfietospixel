@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#e9e8e2">
+<meta name="theme-color" content="#0e0e0c">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -83,10 +83,7 @@
     <aside class="controls" id="controls">
       <div class="controls-header">
         <div class="index-label">EFFECTS</div>
-        <div class="overlay-add">
-          <button id="node-toggle" class="btn btn-small" type="button">node view</button>
-          <button id="reset-btn" class="btn btn-small" type="button">RESET</button>
-        </div>
+        <button id="reset-btn" class="btn btn-small" type="button">RESET</button>
       </div>
       <div id="effect-list"></div>
 
@@ -96,7 +93,7 @@
       <div id="overlay-module-list"></div>
       <div id="star-section">
         <div class="controls-header star-header">
-          <div class="index-label">STARS — drag on canvas</div>
+          <div class="index-label">stars — drag on canvas or use x/y</div>
           <button id="add-star-btn" class="btn btn-small" type="button">+ STAR</button>
         </div>
         <div id="star-list"></div>
@@ -106,15 +103,15 @@
     <section id="node-view" hidden>
       <svg id="node-wires" aria-hidden="true"></svg>
       <div id="node-graph"></div>
-      <div id="node-params" class="node-card" hidden>
-        <div class="node-title node-params-head node-drag">
+      <div id="node-add-menu" class="node-add-menu" hidden></div>
+      <div id="node-backdrop" hidden></div>
+      <div id="node-params" class="node-card node-modal" hidden>
+        <div class="node-title node-params-head">
           <span id="node-params-title"></span>
           <button id="node-params-close" class="node-x" type="button">×</button>
         </div>
         <div id="node-params-body"></div>
       </div>
-      <div id="node-add-menu" class="node-add-menu" hidden></div>
-      <button id="node-exit" class="nbtn node-exit" type="button">list view</button>
     </section>
   </section>
 </main>
@@ -125,6 +122,12 @@
     <button id="sheet-close" class="btn btn-small" type="button">DONE</button>
   </div>
   <div id="sheet-content"></div>
+</div>
+
+<div id="rotate-hint" aria-hidden="true">
+  <div class="rotate-glyph">↻</div>
+  <p>rotate to landscape</p>
+  <span>the node studio needs a wider screen</span>
 </div>
 
 <div id="toast" class="toast" hidden></div>

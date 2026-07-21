@@ -540,6 +540,8 @@ const Effects = (() => {
     name: "STAR",
     defaults: { x: 0.5, y: 0.42, length: 200, spikes: 0.45, thickness: 2.5, intensity: 1, color: "#9db8ff" },
     params: [
+      { key: "x", label: "x position", min: 0, max: 1, step: 0.01 },
+      { key: "y", label: "y position", min: 0, max: 1, step: 0.01 },
       { key: "length", label: "streak length", min: 20, max: 600, step: 5, unit: "px" },
       { key: "spikes", label: "vertical spike", min: 0, max: 1, step: 0.05 },
       { key: "thickness", label: "thickness", min: 1, max: 10, step: 0.5, unit: "px" },

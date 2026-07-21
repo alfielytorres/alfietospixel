@@ -161,9 +161,9 @@
     firstRunTip();
     thumbsStale = true;
     if (mode === "image") { thumbsStale = false; renderLookThumbs(); }
-    // node view is the default editing surface on desktop
-    if (window.innerWidth > 940) enterNodeView();
-    else exitNodeView();
+    // node view is the only editing surface, on every device
+    document.body.classList.add("editing");
+    enterNodeView();
   }
 
   function toast(msg, ms) {
@@ -183,9 +183,7 @@
     try { seen = localStorage.getItem("versions-eye-tip"); } catch { /* private mode */ }
     if (seen) return;
     try { localStorage.setItem("versions-eye-tip", "1"); } catch { /* ignore */ }
-    const tip = window.innerWidth > 940
-      ? "click + to add a filter · click a node to edit · drag to rearrange"
-      : "tap a look · tap a tool chip to edit · export from the bar";
+    const tip = "tap + to add a filter · tap a node to edit · drag to rearrange";
     setTimeout(() => toast(tip, 4200), 700);
   }
 
@@ -1360,6 +1358,7 @@
   $("export-video-btn").addEventListener("click", exportVideo);
   $("new-image-btn").addEventListener("click", () => {
     document.body.classList.remove("in-app");
+    document.body.classList.remove("editing");
     exitNodeView();
     cleanupVideo();
     cleanupLive();
@@ -2009,6 +2008,7 @@
       menu.hidden = true;
       addStar();
       renderNodeGraph();
+      openNodeParams({ id: "__stars", kind: "stars", label: "stars" });
     });
     menu.appendChild(star);
     if (!hasAny && !stars.length) { /* still show star option */ }
@@ -2032,6 +2032,7 @@
     $("node-params-title").textContent = (def.kind === "stars" ? "stars" : def.label).toLowerCase();
     $("node-params-body").appendChild(node);
     if (node.classList.contains("effect")) node.classList.add("open");
+    $("node-backdrop").hidden = false;
     $("node-params").hidden = false;
   }
   function closeNodeParams() {
@@ -2040,6 +2041,7 @@
       nodeParamsStash = null;
     }
     $("node-params").hidden = true;
+    $("node-backdrop").hidden = true;
   }
 
   // refresh node thumbnails without rebuilding the layout
@@ -2068,6 +2070,8 @@
     $("node-view").hidden = false;
     renderNodeGraph();          // this moves the canvas into the result node
     requestAnimationFrame(updateWires);
+    // installed / fullscreen PWAs can request landscape; harmless elsewhere
+    try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {}); } catch { /* ignore */ }
   }
   function exitNodeView() {
     if (!document.body.classList.contains("node-mode")) return;
@@ -2078,13 +2082,13 @@
     $("canvas-wrap").appendChild(canvas);
   }
 
-  $("node-toggle").addEventListener("click", enterNodeView);
-  $("node-exit").addEventListener("click", exitNodeView);
   $("node-params-close").addEventListener("click", closeNodeParams);
-  makeCardDraggable($("node-params"), true);
+  $("node-backdrop").addEventListener("click", closeNodeParams);
   window.addEventListener("resize", () => {
-    if (window.innerWidth <= 940) exitNodeView();
-    else if (document.body.classList.contains("node-mode")) layoutNodes();
+    if (document.body.classList.contains("node-mode")) layoutNodes();
+  });
+  window.addEventListener("orientationchange", () => {
+    if (document.body.classList.contains("node-mode")) setTimeout(layoutNodes, 250);
   });
   document.addEventListener("change", (ev) => {
     if (ev.target && ev.target.classList && ev.target.classList.contains("effect-toggle")) {
