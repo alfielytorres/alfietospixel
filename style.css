@@ -403,6 +403,15 @@ select:focus { border-color: var(--ink); outline: none; }
 }
 .color-item input[type="text"]:focus { border-color: var(--ink); outline: none; }
 .color-item input[type="text"].invalid { border-color: #cc2222; color: #cc2222; }
+.text-input {
+  width: 100%;
+  font: inherit; font-size: .78rem;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--hairline); border-radius: 0;
+  padding: .45em .5em; resize: vertical; min-height: 2.4em;
+}
+.text-input:focus { border-color: var(--ink); outline: none; }
+#node-params .text-input { background: #1d1d1a; border-color: #2c2c28; }
 
 /* ---- overlay items ---- */
 .overlays-header { margin-top: 2rem; align-items: center; gap: .8rem; }
@@ -752,7 +761,8 @@ body.node-mode #node-view { display: block; }
   cursor: grab;
 }
 .node-card-x { position: absolute; top: 7px; right: 8px; opacity: 0; transition: opacity .12s; z-index: 2; }
-.node-source-tabs { display: flex; gap: 4px; padding: 0 10px 10px; }
+.node-source-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 10px; }
+.node-source-tabs .src-tab { min-width: 0; }
 .src-tab {
   flex: 1;
   font: 500 .64rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif;

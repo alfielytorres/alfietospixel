@@ -534,7 +534,50 @@ const Effects = (() => {
         { key: "color", label: "custom color", type: "color" },
       ],
     },
+    text: {
+      name: "TEXT",
+      defaults: { text: "VERSIONS", size: 12, x: 0.5, y: 0.86, color: "#ffffff",
+        align: "center", weight: "bold", family: "serif", pulse: 0 },
+      params: [
+        { key: "text", label: "text / lyrics", type: "text" },
+        { key: "size", label: "size", min: 2, max: 40, step: 0.5, unit: "%" },
+        { key: "x", label: "x position", min: 0, max: 1, step: 0.01 },
+        { key: "y", label: "y position", min: 0, max: 1, step: 0.01 },
+        { key: "align", label: "align", type: "select",
+          options: [["center", "center"], ["left", "left"], ["right", "right"]] },
+        { key: "weight", label: "weight", type: "select",
+          options: [["bold", "bold"], ["normal", "regular"], ["800", "black"]] },
+        { key: "family", label: "typeface", type: "select",
+          options: [["serif", "serif"], ["sans-serif", "sans"], ["monospace", "mono"]] },
+        { key: "color", label: "color", type: "color" },
+        { key: "pulse", label: "beat pulse", min: 0, max: 1, step: 0.05 },
+      ],
+    },
   };
+
+  // TEXT overlay: drawn with a real 2d context (multi-line, styled). `beat`
+  // (0..1, from the audio analyser) scales it when "beat pulse" > 0.
+  function drawTextOverlay(img, p, beat) {
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    const g = c.getContext("2d");
+    g.putImageData(img, 0, 0);
+    const pulse = 1 + (beat || 0) * p.pulse * 0.5;
+    const size = Math.max(4, (p.size / 100) * img.height * pulse);
+    g.font = `${p.weight} ${size}px ${p.family}`;
+    g.fillStyle = p.color;
+    g.textAlign = p.align;
+    g.textBaseline = "middle";
+    g.shadowColor = "rgba(0,0,0,.55)";
+    g.shadowBlur = size * 0.08;
+    const cx = p.align === "left" ? img.width * 0.06
+      : p.align === "right" ? img.width * 0.94 : img.width * p.x;
+    const lines = String(p.text == null ? "" : p.text).split("\n");
+    const lh = size * 1.15;
+    let y = img.height * p.y - (lines.length - 1) * lh / 2;
+    for (const line of lines) { g.fillText(line, cx, y); y += lh; }
+    return g.getImageData(0, 0, img.width, img.height);
+  }
 
   const STAR_TYPE = {
     name: "STAR",
@@ -726,15 +769,17 @@ const Effects = (() => {
     }
   }
 
-  function renderOverlayStack(img, modules, stars, temporal) {
+  function renderOverlayStack(img, modules, stars, temporal, beat) {
+    const textOn = modules && modules.text && modules.text.enabled;
     const anyModule = modules && (modules.orbs.enabled || modules.lines.enabled);
-    if (!anyModule && (!stars || !stars.length)) return img;
-    const res = clone(img);
+    if (!anyModule && !textOn && (!stars || !stars.length)) return img;
+    let res = clone(img);
     const d = res.data, w = res.width, h = res.height;
     const src = img.data; // sample the pre-overlay image so modules react to IT
     if (modules && modules.orbs.enabled) drawOrbsModule(d, w, h, src, modules.orbs.params, temporal);
     if (modules && modules.lines.enabled) drawLinesModule(d, w, h, src, modules.lines.params);
     for (const s of stars || []) drawStar(d, w, h, s);
+    if (textOn) res = drawTextOverlay(res, modules.text.params, beat || 0);
     return res;
   }
 

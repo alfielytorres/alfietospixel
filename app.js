@@ -47,9 +47,42 @@
   const overlayModules = {
     orbs: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) },
     lines: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) },
+    text: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.text.defaults) },
   };
   let stars = [];
   let dragIdx = -1;
+
+  // ---- audio: an added track drives audio-reactive effects (beat 0..1) ----
+  let audioEl = null, audioUrl = null, audioCtx = null, analyser = null, audioData = null;
+  let audioLevel = 0, audioRaf = 0;
+  const audioReact = { amount: 0.7 };
+  const audioActive = () => !!(audioEl && !audioEl.paused);
+
+  // per-frame chain modulated by the beat, for realtime preview/record only
+  function beatChain() {
+    if (!audioActive()) return chain;
+    const lvl = audioLevel * audioReact.amount;
+    if (lvl < 0.001) return chain;
+    const c = {};
+    for (const e of Effects.REGISTRY) {
+      const st = chain[e.id];
+      if (!st.enabled) { c[e.id] = st; continue; }
+      const p = { ...st.params };
+      if (e.id === "rgbshift") p.amount = st.params.amount * (1 + lvl * 2.2);
+      else if (e.id === "slice") p.intensity = Math.min(1, st.params.intensity * (1 + lvl * 1.4));
+      else if (e.id === "blocks") p.blocks = Math.round(st.params.blocks * (1 + lvl * 1.3));
+      else if (e.id === "dither") p.pixelSize = Math.max(1, Math.round(st.params.pixelSize * (1 + lvl * 0.7)));
+      else if (e.id === "vhs") p.jitter = Math.min(1, (st.params.jitter || 0) + lvl * 0.6);
+      c[e.id] = { enabled: true, params: p };
+    }
+    return c;
+  }
+
+  // one place that runs the chain + overlays; `live` enables beat reaction
+  function pipelineApply(frame, seedVal, live) {
+    const out = Effects.apply(frame, live ? beatChain() : chain, seedVal);
+    return Effects.renderOverlayStack(out, overlayModules, stars, !!live, live ? audioLevel : 0);
+  }
 
   // live camera state
   let camStream = null;
@@ -73,14 +106,13 @@
     requestAnimationFrame(() => {
       renderQueued = false;
       let out = sourceImage;
-      if (!holdOriginal) {
-        out = Effects.apply(sourceImage, chain, seed);
-        out = Effects.renderOverlayStack(out, overlayModules, stars, false);
-      }
+      if (!holdOriginal) out = pipelineApply(sourceImage, seed, audioActive());
       canvas.width = out.width;
       canvas.height = out.height;
       ctx.putImageData(out, 0, 0);
       scheduleThumbs();
+      // keep re-rendering a still while audio is playing so it pulses
+      if (mode === "image" && audioActive() && !holdOriginal) requestAnimationFrame(render);
     });
   }
 
@@ -113,8 +145,7 @@
     if (thumbsStale) { thumbsStale = false; renderLookThumbs(); }
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
-      frame = Effects.apply(frame, chain, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)));
-      frame = Effects.renderOverlayStack(frame, overlayModules, stars, true);
+      frame = pipelineApply(frame, frameSeedAt(Math.floor(videoEl.currentTime * EXPORT_FPS)), true);
     }
     if (canvas.width !== vw) canvas.width = vw;
     if (canvas.height !== vh) canvas.height = vh;
@@ -310,8 +341,7 @@
     let frame = vctx.getImageData(0, 0, vw, vh);
     if (!holdOriginal) {
       const f = Math.floor(((performance.now() - liveStart) / 1000) * EXPORT_FPS);
-      frame = Effects.apply(frame, chain, frameSeedAt(f));
-      frame = Effects.renderOverlayStack(frame, overlayModules, stars, true);
+      frame = pipelineApply(frame, frameSeedAt(f), true);
     }
     if (canvas.width !== vw) canvas.width = vw;
     if (canvas.height !== vh) canvas.height = vh;
@@ -503,6 +533,50 @@
     v.load(); // iOS Safari won't fire loadedmetadata for blob URLs without this
   }
 
+  // ---- audio track: plays alongside the visual and feeds the analyser ----
+  function cleanupAudioTrack() {
+    cancelAnimationFrame(audioRaf);
+    audioLevel = 0;
+    if (audioEl) { audioEl.pause(); audioEl.removeAttribute("src"); audioEl.load(); }
+    if (audioCtx) { try { audioCtx.close(); } catch { /* already closed */ } }
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioEl = null; audioCtx = null; analyser = null; audioData = null; audioUrl = null;
+  }
+
+  function audioTick() {
+    if (analyser && audioData) {
+      analyser.getByteFrequencyData(audioData);
+      let sum = 0; const n = Math.min(28, audioData.length); // low-mid bins ~ the beat
+      for (let i = 0; i < n; i++) sum += audioData[i];
+      const raw = (sum / n) / 255;
+      audioLevel = audioLevel * 0.78 + raw * 0.22;
+    }
+    audioRaf = requestAnimationFrame(audioTick);
+  }
+
+  function loadAudioTrack(file) {
+    cleanupAudioTrack();
+    audioUrl = URL.createObjectURL(file);
+    audioEl = new Audio(audioUrl);
+    audioEl.loop = true;
+    audioEl.play().catch(() => {});
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaElementSource(audioEl);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      audioData = new Uint8Array(analyser.frequencyBinCount);
+      src.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      audioCtx.resume().catch(() => {});
+    } catch { /* analyser optional — playback still works */ }
+    cancelAnimationFrame(audioRaf);
+    audioTick();
+    toast("audio attached — effects now react to the beat", 3200);
+    if (mode === "image") render();
+    if (document.body.classList.contains("node-mode")) renderNodeGraph();
+  }
+
   function loadFile(file) {
     if (!file) return;
     const name = (file.name || "").toLowerCase();
@@ -513,7 +587,10 @@
       (!file.type && /\.(mov|mp4|m4v|webm|mkv)$/.test(name));
     const isImage = file.type.startsWith("image/") ||
       (!file.type && /\.(png|jpe?g|gif|webp|bmp|avif)$/.test(name));
+    const isAudio = file.type.startsWith("audio/") ||
+      (!file.type && /\.(mp3|wav|m4a|aac|ogg|flac)$/.test(name));
     if (isHeif) { loadHeicFile(file); return; }
+    if (isAudio) { loadAudioTrack(file); return; } // attach to the current visual
     if (isVideo) { loadVideoFile(file); return; }
     if (!isImage) return;
     showLoader("LOADING IMAGE…");
@@ -1090,6 +1167,15 @@
       });
       row.appendChild(sel);
       valEl.remove();
+    } else if (p.type === "text") {
+      const ta = document.createElement("textarea");
+      ta.className = "text-input";
+      ta.rows = 2;
+      ta.placeholder = "type text / paste lyrics — one line per row";
+      ta.value = get();
+      ta.addEventListener("input", () => { set(ta.value); render(); });
+      row.appendChild(ta);
+      valEl.remove();
     } else if (p.type === "color") {
       const item = document.createElement("div");
       item.className = "color-item";
@@ -1143,7 +1229,7 @@
     list.innerHTML = "";
 
     // --- ORBS / LINES modules: one toggleable block each, like filters ---
-    for (const key of ["orbs", "lines"]) {
+    for (const key of ["orbs", "lines", "text"]) {
       const def = Effects.OVERLAY_MODULES[key];
       const state = overlayModules[key];
       const box = document.createElement("div");
@@ -1304,6 +1390,7 @@
     stars = [];
     overlayModules.orbs = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) };
     overlayModules.lines = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) };
+    overlayModules.text = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.text.defaults) };
     buildOverlayList();
     syncControls();
     render();
@@ -1362,6 +1449,7 @@
     exitNodeView();
     cleanupVideo();
     cleanupLive();
+    cleanupAudioTrack();
     mode = "image";
     $("workspace").hidden = true;
     $("dropzone").hidden = false;
@@ -1435,6 +1523,7 @@
     const m = {
       orbs: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) },
       lines: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) },
+      text: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.text.defaults) },
     };
     LOOKS[name](c, m);
     return { c, m };
@@ -1481,6 +1570,7 @@
     }
     overlayModules.orbs = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) };
     overlayModules.lines = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) };
+    overlayModules.text = { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.text.defaults) };
     LOOKS[name](chain, overlayModules);
     syncControls();
     buildOverlayModules();
@@ -1713,6 +1803,7 @@
     ...Effects.REGISTRY.map((e) => ({ id: e.id, label: e.name, kind: "effect" })),
     { id: "orbs", label: "ORBS", kind: "module" },
     { id: "lines", label: "LINES", kind: "module" },
+    { id: "text", label: "TEXT", kind: "module" },
   ];
   function nodeEnabled(def) {
     return def.kind === "effect" ? chain[def.id].enabled : overlayModules[def.id].enabled;
@@ -1737,6 +1828,7 @@
     }
     if (overlayModules.orbs.enabled) list.push({ id: "orbs", kind: "module", label: "ORBS" });
     if (overlayModules.lines.enabled) list.push({ id: "lines", kind: "module", label: "LINES" });
+    if (overlayModules.text.enabled) list.push({ id: "text", kind: "module", label: "TEXT" });
     if (stars.length) list.push({ id: "__stars", kind: "stars", label: `stars (${stars.length})` });
     list.push({ id: "__result", kind: "result", label: "result" });
     return list;
@@ -1768,6 +1860,7 @@
     const m = {
       orbs: { enabled: false, params: overlayModules.orbs.params },
       lines: { enabled: false, params: overlayModules.lines.params },
+      text: { enabled: false, params: overlayModules.text.params },
     };
     let useStars = false;
     for (let i = 1; i <= k; i++) {
@@ -1865,6 +1958,10 @@
             mk("photo", mode === "image", () => pickFile("image/*,.heic,.heif")),
             mk("video", mode === "video", () => pickFile("video/*")),
             mk("live", mode === "live", () => startLive()),
+            mk(audioEl ? "♪ audio" : "audio", !!audioEl, () => {
+              if (audioEl) { cleanupAudioTrack(); renderNodeGraph(); if (mode === "image") render(); }
+              else pickFile("audio/*");
+            }),
           );
           card.appendChild(tabs);
         } else {
@@ -1998,7 +2095,6 @@
         updateChips();
         render();
         renderNodeGraph();
-        openNodeParams(def);
       });
       menu.appendChild(b);
     }
@@ -2008,7 +2104,6 @@
       menu.hidden = true;
       addStar();
       renderNodeGraph();
-      openNodeParams({ id: "__stars", kind: "stars", label: "stars" });
     });
     menu.appendChild(star);
     if (!hasAny && !stars.length) { /* still show star option */ }
