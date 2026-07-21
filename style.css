@@ -978,3 +978,15 @@ body.editor-mode .workspace { display: block; }
 .tl-snapline { position: absolute; top: 18px; bottom: 0; width: 1px; background: #ffd75e; z-index: 6; pointer-events: none; }
 
 body.editor-mode #to-editor { display: none; }
+
+.ico-btn { display: inline-flex; align-items: center; gap: .45em; }
+.ico-btn svg { display: block; }
+.rotate-glyph svg { display: block; }
+
+/* ---- camera capture overlay ---- */
+.capture { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.82); display: flex; align-items: center; justify-content: center; }
+.capture-inner { display: flex; flex-direction: column; gap: 12px; align-items: center; max-width: 92vw; }
+#capture-video { max-width: 92vw; max-height: 70vh; border: 1px solid var(--hairline); border-radius: 6px; background: #000; transform: scaleX(1); }
+#capture-video.mirror { transform: scaleX(-1); }
+.capture-bar { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+.cap-rec-on { background: #c0271f !important; border-color: #c0271f !important; color: #fff !important; }

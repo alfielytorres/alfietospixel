@@ -102,14 +102,16 @@
     <section id="editor-view">
       <div class="ev-top">
         <div id="ev-preview" class="ev-preview"></div>
-        <button id="to-effects" class="nbtn ev-effects-btn" type="button">⚙ effects</button>
+        <button id="to-effects" class="nbtn ico-btn ev-effects-btn" type="button"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"/></svg><span>effects</span></button>
       </div>
       <div id="timeline" class="timeline">
         <div class="tl-bar">
-          <button id="tl-play" class="nbtn" type="button">▶ play</button>
+          <button id="tl-play" class="nbtn ico-btn" type="button"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2 1.5v9l8-4.5z" fill="currentColor"/></svg><span>play</span></button>
           <span id="tl-time" class="tl-time">0.0 / 0.0s</span>
           <span class="tl-hint">3 layers · magnetic · max 15s</span>
+          <button id="tl-visualizer" class="nbtn ico-btn" type="button"><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 2l1.7 5.3L19 9l-5.3 1.7L12 16l-1.7-5.3L5 9l5.3-1.7z" fill="currentColor"/><circle cx="18.5" cy="17.5" r="1.5" fill="currentColor"/></svg><span>visualizer</span></button>
           <span class="tl-spacer"></span>
+          <button id="tl-edit" class="nbtn" type="button" hidden>edit clip</button>
           <button id="tl-del" class="nbtn" type="button" hidden>delete clip</button>
           <button id="tl-export" class="nbtn nbtn-primary" type="button">export</button>
           <div class="tl-add-wrap">
@@ -118,6 +120,7 @@
               <button type="button" data-add="image">image / photo</button>
               <button type="button" data-add="video">video clip</button>
               <button type="button" data-add="audio">audio track</button>
+              <button type="button" data-add="camera">camera · photo / record</button>
               <button type="button" data-add="text">text</button>
               <button type="button" data-add="color">color card</button>
             </div>
@@ -138,7 +141,7 @@
     <section id="node-view" hidden>
       <svg id="node-wires" aria-hidden="true"></svg>
       <div id="node-graph"></div>
-      <button id="to-editor" class="nbtn node-exit" type="button">▤ editor</button>
+      <button id="to-editor" class="nbtn ico-btn node-exit" type="button"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4"/></svg><span>editor</span></button>
       <div id="node-add-menu" class="node-add-menu" hidden></div>
       <div id="node-backdrop" hidden></div>
       <div id="node-params" class="node-card node-modal" hidden>
@@ -160,8 +163,20 @@
   <div id="sheet-content"></div>
 </div>
 
+<div id="capture" class="capture" hidden>
+  <div class="capture-inner">
+    <video id="capture-video" playsinline muted></video>
+    <div class="capture-bar">
+      <button id="cap-snap" class="nbtn nbtn-primary" type="button">snap photo</button>
+      <button id="cap-rec" class="nbtn" type="button">record</button>
+      <button id="cap-flip" class="nbtn" type="button">flip</button>
+      <button id="cap-close" class="nbtn" type="button">close</button>
+    </div>
+  </div>
+</div>
+
 <div id="rotate-hint" aria-hidden="true">
-  <div class="rotate-glyph">↻</div>
+  <div class="rotate-glyph"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3.5V8h-4.5"/></svg></div>
   <p>rotate to landscape</p>
   <span>the node studio needs a wider screen</span>
 </div>

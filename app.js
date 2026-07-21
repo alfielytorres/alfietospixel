@@ -56,7 +56,8 @@
   let audioEl = null, audioUrl = null, audioCtx = null, analyser = null, audioData = null;
   let audioLevel = 0, audioRaf = 0;
   const audioReact = { amount: 0.7 };
-  const audioActive = () => !!(audioEl && !audioEl.paused);
+  const audioActive = () => (audioEl && !audioEl.paused) ||
+    (typeof TL !== "undefined" && TL.clips && TL.clips.some((c) => (c.kind === "audio" || c.kind === "video") && c.el && !c.el.paused));
 
   // per-frame chain modulated by the beat, for realtime preview/record only
   function beatChain() {
@@ -1928,7 +1929,7 @@
           tabs.className = "node-source-tabs";
           const b = document.createElement("button");
           b.type = "button"; b.className = "src-tab active";
-          b.textContent = "◧ timeline · edit";
+          b.textContent = "timeline · edit";
           b.addEventListener("click", (ev) => { ev.stopPropagation(); enterEditor(); });
           tabs.appendChild(b);
           card.appendChild(tabs);
@@ -2171,12 +2172,14 @@
   const tlCanvas = document.createElement("canvas");
   const tlCtx = tlCanvas.getContext("2d", { willReadFrequently: true });
   const SNAP_PX = 7;
-  let mixCtx = null, mixDest = null;
+  let mixCtx = null, mixDest = null, mixAnalyser = null, mixData = null;
   function ensureMix() {
     if (!mixCtx) {
       try {
         mixCtx = new (window.AudioContext || window.webkitAudioContext)();
         mixDest = mixCtx.createMediaStreamDestination();
+        mixAnalyser = mixCtx.createAnalyser(); mixAnalyser.fftSize = 256;
+        mixData = new Uint8Array(mixAnalyser.frequencyBinCount);
       } catch { mixCtx = null; }
     }
     if (mixCtx && mixCtx.state === "suspended") mixCtx.resume().catch(() => {});
@@ -2189,7 +2192,15 @@
       c._src = mixCtx.createMediaElementSource(c.el);
       c._src.connect(mixCtx.destination); // speakers
       c._src.connect(mixDest);            // export tap
+      c._src.connect(mixAnalyser);        // beat detection
     } catch { c._src = null; }
+  }
+  function updateBeat() {
+    if (!mixAnalyser || !mixData) return;
+    mixAnalyser.getByteFrequencyData(mixData);
+    let sum = 0; const n = Math.min(28, mixData.length);
+    for (let i = 0; i < n; i++) sum += mixData[i];
+    audioLevel = audioLevel * 0.72 + ((sum / n) / 255) * 0.28;
   }
 
   function tlTracksEl() { return $("tl-tracks"); }
@@ -2197,12 +2208,19 @@
   function projectEnd() { return Math.min(TL.duration, TL.clips.reduce((m, c) => Math.max(m, c.start + c.dur), 0)); }
   function remainingFrom(t) { return Math.max(0.5, TL.duration - t); }
 
-  function coverDraw(ctx, el, ew, eh) {
+  function drawVisual(ctx, el, ew, eh, c) {
     const W = TL.W, H = TL.H;
     if (!ew || !eh) return;
-    const s = Math.max(W / ew, H / eh);
-    const dw = ew * s, dh = eh * s;
-    ctx.drawImage(el, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    const base = c.fit === "contain" ? Math.min(W / ew, H / eh)
+      : c.fit === "stretch" ? 0 : Math.max(W / ew, H / eh);
+    if (c.fit === "stretch") {
+      const dw = W * (c.scale || 1), dh = H * (c.scale || 1);
+      ctx.drawImage(el, (W - dw) / 2 + (c.ox || 0) * W, (H - dh) / 2 + (c.oy || 0) * H, dw, dh);
+      return;
+    }
+    const sc = base * (c.scale || 1);
+    const dw = ew * sc, dh = eh * sc;
+    ctx.drawImage(el, (W - dw) / 2 + (c.ox || 0) * W, (H - dh) / 2 + (c.oy || 0) * H, dw, dh);
   }
 
   function clipsOnLayer(layer) {
@@ -2214,14 +2232,15 @@
 
   function drawTLClip(ctx, c, t) {
     const lt = t - c.start;
-    if (c.kind === "image") { coverDraw(ctx, c.el, c.natW, c.natH); }
+    if (c.kind === "image") { drawVisual(ctx, c.el, c.natW, c.natH, c); }
     else if (c.kind === "video") {
-      try { coverDraw(ctx, c.el, c.el.videoWidth, c.el.videoHeight); } catch { /* not ready */ }
+      try { drawVisual(ctx, c.el, c.el.videoWidth, c.el.videoHeight, c); } catch { /* not ready */ }
     } else if (c.kind === "color") {
       ctx.fillStyle = c.color; ctx.fillRect(0, 0, TL.W, TL.H);
     } else if (c.kind === "text") {
       const s = c.style;
-      ctx.font = `${s.weight} ${(s.size / 100) * TL.H}px ${s.family}`;
+      const pulse = 1 + audioLevel * (s.pulse || 0) * 0.6;
+      ctx.font = `${s.weight} ${(s.size / 100) * TL.H * pulse}px ${s.family}`;
       ctx.fillStyle = s.color; ctx.textAlign = s.align; ctx.textBaseline = "middle";
       ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = (s.size / 100) * TL.H * 0.08;
       const cx = s.align === "left" ? TL.W * 0.06 : s.align === "right" ? TL.W * 0.94 : TL.W * s.x;
@@ -2244,6 +2263,7 @@
 
   function renderComposite() {
     if (!TL.clips.length) { drawEmptyPreview(); return; }
+    updateBeat();
     const frame = compositeFrame(TL.playhead);
     const out = pipelineApply(frame, frameSeedAt(Math.floor(TL.playhead * EXPORT_FPS)), TL.playing || audioActive());
     if (canvas.width !== out.width) canvas.width = out.width;
@@ -2290,13 +2310,13 @@
     if (TL.playing || !TL.clips.length) return;
     if (TL.playhead >= projectEnd() - 0.02) TL.playhead = 0;
     TL.playing = true; TL.lastPerf = performance.now();
-    $("tl-play").textContent = "❚❚ pause";
+    $("tl-play").innerHTML = '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><rect x="2" y="1.5" width="3" height="9" fill="currentColor"/><rect x="7" y="1.5" width="3" height="9" fill="currentColor"/></svg><span>pause</span>';
     tlLoop();
   }
   function tlPause() {
     TL.playing = false; cancelAnimationFrame(TL.raf);
     for (const c of TL.clips) if (c.el && (c.kind === "video" || c.kind === "audio")) c.el.pause();
-    $("tl-play").textContent = "▶ play";
+    $("tl-play").innerHTML = '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2 1.5v9l8-4.5z" fill="currentColor"/></svg><span>play</span>';
     syncMedia(true); renderComposite();
   }
   function tlTogglePlay() { TL.playing ? tlPause() : tlPlay(); }
@@ -2341,6 +2361,7 @@
     }
     updatePlayhead();
     $("tl-del").hidden = TL.sel == null;
+    $("tl-edit").hidden = TL.sel == null;
   }
 
   // snap candidate times from clip edges (excluding the moving clip), 0, end, playhead
@@ -2385,12 +2406,19 @@
     if (document.body.classList.contains("node-mode")) renderNodeGraph();
   }
 
+  function hasVisual() { return TL.clips.some((c) => c.kind === "image" || c.kind === "video"); }
+  function setAspect(w, h) {
+    if (!w || !h) return;
+    TL.W = w >= h ? Math.min(1280, w) : Math.round(720 * w / h);
+    TL.H = Math.round(TL.W * h / w);
+    tlCanvas.width = TL.W; tlCanvas.height = TL.H;
+  }
   function tlAddImage(file) {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      if (TL.clips.length === 0) { TL.W = Math.min(1280, img.naturalWidth); TL.H = Math.round(TL.W * img.naturalHeight / img.naturalWidth); tlCanvas.width = TL.W; tlCanvas.height = TL.H; }
-      addClipObj({ kind: "image", el: img, natW: img.naturalWidth, natH: img.naturalHeight, name: file.name, thumb: url, start: 0, dur: Math.min(3, remainingFrom(TL.playhead)), layer: 0 });
+      if (!hasVisual()) setAspect(img.naturalWidth, img.naturalHeight);
+      addClipObj({ kind: "image", el: img, natW: img.naturalWidth, natH: img.naturalHeight, name: file.name, thumb: url, fit: "cover", scale: 1, ox: 0, oy: 0, start: 0, dur: Math.min(3, remainingFrom(TL.playhead)), layer: 0 });
     };
     img.src = url;
   }
@@ -2399,12 +2427,83 @@
     const v = document.createElement("video");
     v.src = url; v.muted = false; v.playsInline = true; v.preload = "auto";
     v.addEventListener("loadedmetadata", () => {
-      if (TL.clips.length === 0 && v.videoWidth) { TL.W = Math.min(1280, v.videoWidth); TL.H = Math.round(TL.W * v.videoHeight / v.videoWidth); tlCanvas.width = TL.W; tlCanvas.height = TL.H; }
+      if (!hasVisual() && v.videoWidth) setAspect(v.videoWidth, v.videoHeight);
       const dur = Math.min(isFinite(v.duration) ? v.duration : 5, remainingFrom(TL.playhead), TL.duration);
-      const clip = { kind: "video", el: v, natW: v.videoWidth, natH: v.videoHeight, inPoint: 0, mediaDur: v.duration, name: file.name, start: 0, dur, layer: 0 };
+      const clip = { kind: "video", el: v, natW: v.videoWidth, natH: v.videoHeight, fit: "cover", scale: 1, ox: 0, oy: 0, inPoint: 0, mediaDur: v.duration, name: file.name, start: 0, dur, layer: 0 };
       connectClipAudio(clip); addClipObj(clip);
     }, { once: true });
   }
+  function tlAddVideoBlob(blob, name) {
+    tlAddVideo(new File([blob], name || "camera.webm", { type: blob.type || "video/webm" }));
+  }
+  function tlAddImageBlob(blob, name) {
+    tlAddImage(new File([blob], name || "photo.png", { type: blob.type || "image/png" }));
+  }
+
+  // ---- camera capture: snap a photo or record a clip into the timeline ----
+  let capStream = null, capRec = null, capChunks = [], capFacing = "user", capRecStart = 0, capRaf = 0;
+  async function openCapture() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert("Camera needs HTTPS and a supported browser."); return; }
+    try {
+      capStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: capFacing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
+    } catch { alert("Camera/mic access was blocked. Allow it and try again."); return; }
+    const v = $("capture-video");
+    v.srcObject = capStream; v.classList.toggle("mirror", capFacing === "user");
+    v.play().catch(() => {});
+    $("capture").hidden = false;
+  }
+  function closeCapture() {
+    if (capRec && capRec.state !== "inactive") { try { capRec.stop(); } catch {} }
+    cancelAnimationFrame(capRaf);
+    if (capStream) for (const t of capStream.getTracks()) t.stop();
+    capStream = null; capRec = null;
+    $("capture").hidden = true;
+    $("cap-rec").textContent = "record"; $("cap-rec").classList.remove("cap-rec-on");
+  }
+  function capSnap() {
+    const v = $("capture-video");
+    const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+    const g = c.getContext("2d");
+    if (capFacing === "user") { g.translate(c.width, 0); g.scale(-1, 1); }
+    g.drawImage(v, 0, 0);
+    c.toBlob((b) => { tlAddImageBlob(b, "photo.png"); closeCapture(); }, "image/png");
+  }
+  function capToggleRec() {
+    if (capRec && capRec.state === "recording") { capRec.stop(); return; }
+    if (typeof MediaRecorder === "undefined") { alert("Recording not supported here."); return; }
+    const mime = ["video/mp4;codecs=avc1.64002A,mp4a.40.2", "video/mp4", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    capRec = new MediaRecorder(capStream, { mimeType: mime, videoBitsPerSecond: 10_000_000 });
+    capChunks = [];
+    capRec.ondataavailable = (e) => { if (e.data.size) capChunks.push(e.data); };
+    capRec.onstop = () => {
+      cancelAnimationFrame(capRaf);
+      const blob = new Blob(capChunks, { type: capRec.mimeType || mime });
+      tlAddVideoBlob(blob, "camera.webm");
+      closeCapture();
+    };
+    capRec.start(200); capRecStart = performance.now();
+    $("cap-rec").classList.add("cap-rec-on");
+    const tick = () => {
+      const el = (performance.now() - capRecStart) / 1000;
+      $("cap-rec").textContent = `stop ${el.toFixed(1)}s`;
+      if (el >= MAX_CLIP_SECONDS) { capRec.stop(); return; }
+      capRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  async function capFlip() {
+    capFacing = capFacing === "user" ? "environment" : "user";
+    if (capStream) for (const t of capStream.getTracks()) t.stop();
+    try {
+      capStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: capFacing }, audio: true });
+      const v = $("capture-video"); v.srcObject = capStream; v.classList.toggle("mirror", capFacing === "user"); v.play().catch(() => {});
+    } catch {}
+  }
+  $("cap-snap").addEventListener("click", capSnap);
+  $("cap-rec").addEventListener("click", capToggleRec);
+  $("cap-flip").addEventListener("click", capFlip);
+  $("cap-close").addEventListener("click", closeCapture);
+
   function tlAddAudio(file) {
     const url = URL.createObjectURL(file);
     const a = new Audio(url); a.preload = "auto";
@@ -2415,7 +2514,7 @@
     }, { once: true });
   }
   function tlAddText() {
-    addClipObj({ kind: "text", style: { text: "VERSIONS", size: 12, x: 0.5, y: 0.5, color: "#ffffff", align: "center", weight: "bold", family: "serif" }, start: 0, dur: 3, layer: 0 });
+    addClipObj({ kind: "text", style: { text: "VERSIONS", size: 12, x: 0.5, y: 0.5, color: "#ffffff", align: "center", weight: "bold", family: "serif", pulse: 0 }, start: 0, dur: 3, layer: 0 });
   }
   function tlAddColor() {
     addClipObj({ kind: "color", color: "#8f78ff", start: 0, dur: 3, layer: 2 });
@@ -2505,26 +2604,44 @@
     const kind = b.dataset.add;
     if (kind === "text") return tlAddText();
     if (kind === "color") return tlAddColor();
+    if (kind === "camera") return openCapture();
     const accept = kind === "image" ? "image/*,.heic,.heif" : kind === "video" ? "video/*" : "audio/*";
     pickFile(accept, kind);
   });
   document.addEventListener("click", (ev) => { if (!ev.target.closest(".tl-add-wrap")) $("tl-add-menu").hidden = true; });
   $("tl-play").addEventListener("click", tlTogglePlay);
   $("tl-del").addEventListener("click", deleteSelectedClip);
+  $("tl-edit").addEventListener("click", () => {
+    const c = TL.clips.find((x) => x.id === TL.sel);
+    if (c) openClipParams(c);
+  });
 
   // ---- selected clip → open its params (text/color) in the node modal ----
   tlTracksEl().addEventListener("dblclick", (ev) => {
-    const c = tlClipFromEvent(ev); if (!c) return;
-    if (c.kind === "text" || c.kind === "color") openClipParams(c);
+    const c = tlClipFromEvent(ev); if (c) openClipParams(c);
   });
 
   function openClipParams(c) {
     const body = $("node-params-body");
-    $("node-params-title").textContent = c.kind;
+    $("node-params-title").textContent = c.kind + " clip";
     body.innerHTML = "";
-    if (c.kind === "color") {
-      body.appendChild(buildParamRow({ key: "color", label: "color", type: "color" },
-        () => c.color, (v) => { c.color = v; renderTimeline(); renderComposite(); }));
+    const add = (p, get, set) => body.appendChild(buildParamRow(p, get, set));
+    if (c.kind === "image" || c.kind === "video") {
+      add({ key: "fit", label: "fit", type: "select",
+            options: [["cover", "fill frame (cover)"], ["contain", "fit inside"], ["stretch", "stretch"]] },
+          () => c.fit || "cover", (v) => { c.fit = v; renderComposite(); });
+      add({ key: "scale", label: "scale", min: 0.2, max: 4, step: 0.02 },
+          () => c.scale || 1, (v) => { c.scale = v; renderComposite(); });
+      add({ key: "ox", label: "move x", min: -1, max: 1, step: 0.01 },
+          () => c.ox || 0, (v) => { c.ox = v; renderComposite(); });
+      add({ key: "oy", label: "move y", min: -1, max: 1, step: 0.01 },
+          () => c.oy || 0, (v) => { c.oy = v; renderComposite(); });
+      const tip = document.createElement("p"); tip.className = "hint";
+      tip.style.marginTop = ".6rem"; tip.textContent = "tip: drag the image in the preview to move it";
+      body.appendChild(tip);
+    } else if (c.kind === "color") {
+      add({ key: "color", label: "color", type: "color" },
+        () => c.color, (v) => { c.color = v; renderTimeline(); renderComposite(); });
     } else {
       const P = [
         { key: "text", label: "text", type: "text" },
@@ -2532,7 +2649,10 @@
         { key: "x", label: "x", min: 0, max: 1, step: .01 },
         { key: "y", label: "y", min: 0, max: 1, step: .01 },
         { key: "align", label: "align", type: "select", options: [["center", "center"], ["left", "left"], ["right", "right"]] },
+        { key: "weight", label: "weight", type: "select", options: [["bold", "bold"], ["normal", "regular"], ["800", "black"]] },
+        { key: "family", label: "typeface", type: "select", options: [["serif", "serif"], ["sans-serif", "sans"], ["monospace", "mono"]] },
         { key: "color", label: "color", type: "color" },
+        { key: "pulse", label: "beat pulse", min: 0, max: 1, step: 0.05 },
       ];
       for (const p of P) body.appendChild(buildParamRow(p, () => c.style[p.key], (v) => { c.style[p.key] = v; renderTimeline(); renderComposite(); }));
     }
@@ -2541,6 +2661,38 @@
   }
 
   // ---- view switching ----
+  function activeVisualClip() {
+    for (let L = 0; L < 3; L++) {
+      const c = clipAt(L, TL.playhead);
+      if (c && (c.kind === "image" || c.kind === "video")) return c;
+    }
+    return null;
+  }
+  (function previewDrag() {
+    let dragging = null, sx = 0, sy = 0, ox0 = 0, oy0 = 0;
+    canvas.addEventListener("pointerdown", (ev) => {
+      if (!document.body.classList.contains("editor-mode")) return;
+      const c = activeVisualClip(); if (!c) return;
+      dragging = c; sx = ev.clientX; sy = ev.clientY; ox0 = c.ox || 0; oy0 = c.oy || 0;
+      canvas.setPointerCapture(ev.pointerId); ev.preventDefault();
+    });
+    canvas.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      const r = canvas.getBoundingClientRect();
+      dragging.ox = ox0 + (ev.clientX - sx) / r.width;
+      dragging.oy = oy0 + (ev.clientY - sy) / r.height;
+      renderComposite();
+    });
+    for (const n of ["pointerup", "pointercancel"]) canvas.addEventListener(n, () => { dragging = null; });
+    canvas.addEventListener("wheel", (ev) => {
+      if (!document.body.classList.contains("editor-mode")) return;
+      const c = activeVisualClip(); if (!c) return;
+      ev.preventDefault();
+      c.scale = Math.max(0.2, Math.min(4, (c.scale || 1) * (ev.deltaY < 0 ? 1.06 : 0.94)));
+      renderComposite();
+    }, { passive: false });
+  })();
+
   function enterEditor() {
     document.body.classList.remove("node-mode");
     document.body.classList.add("editor-mode");
@@ -2593,6 +2745,23 @@
     TL.playhead = 0; renderComposite(); updatePlayhead();
     TL._exporting = false; btn.disabled = false; btn.textContent = "export";
   }
+  function applyVisualizer() {
+    chain.dither.enabled = true;
+    Object.assign(chain.dither.params, { algorithm: "bayer8", palette: "flareware", pixelSize: 3, contrast: 1.15 });
+    chain.rgbshift.enabled = true; Object.assign(chain.rgbshift.params, { amount: 4, angle: 0 });
+    chain.slice.enabled = true; Object.assign(chain.slice.params, { slices: 6, intensity: 0.4, channelTear: true });
+    chain.wave.enabled = true; Object.assign(chain.wave.params, { amplitude: 6, frequency: 3, axis: "horizontal" });
+    audioReact.amount = 0.95;
+    syncControls();
+    if (!TL.clips.some((c) => c.kind === "text")) {
+      addClipObj({ kind: "text", style: { text: "type your lyrics\nhere", size: 9, x: 0.5, y: 0.82, color: "#ffffff", align: "center", weight: "bold", family: "serif", pulse: 0.6 }, start: 0, dur: Math.max(3, projectEnd()), layer: 0 });
+    }
+    renderComposite();
+    const hasAudio = TL.clips.some((c) => c.kind === "audio" || c.kind === "video");
+    toast(hasAudio ? "visualizer on — hit play, it distorts to the beat · edit the lyrics clip"
+      : "visualizer on — add an audio track, then play to make it react", 4600);
+  }
+  $("tl-visualizer").addEventListener("click", applyVisualizer);
   $("tl-export").addEventListener("click", tlExport);
 
   $("to-effects").addEventListener("click", editorToEffects);
