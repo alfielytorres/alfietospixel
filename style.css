@@ -991,6 +991,12 @@ body.editor-mode #to-editor { display: none; }
 
 .ico-btn { display: inline-flex; align-items: center; gap: .45em; }
 .ico-btn svg { display: block; }
+/* visualizer button while "armed" and waiting for a clip double-tap */
+#tl-visualizer.armed {
+  background: var(--lavender); color: #131311; border-color: var(--lavender);
+  animation: viz-pulse 1s ease-in-out infinite;
+}
+@keyframes viz-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(214, 203, 250, .5); } 50% { box-shadow: 0 0 0 5px rgba(214, 203, 250, 0); } }
 .rotate-glyph svg { display: block; }
 
 /* ---- camera capture overlay ---- */

@@ -2168,6 +2168,7 @@
   const TL = {
     clips: [], duration: 15, playhead: 0, playing: false,
     raf: 0, lastPerf: 0, W: 960, H: 540, sel: null, nextId: 1, aspect: "16:9",
+    layers: 3, maxLayers: 20,
   };
   const ASPECT_WH = { "16:9": [960, 540], "9:16": [540, 960], "1:1": [720, 720] };
   const EXPORT_SIZES = {
@@ -2238,16 +2239,22 @@
   function drawVisual(ctx, el, ew, eh, c) {
     const W = TL.W, H = TL.H;
     if (!ew || !eh) return;
+    // beat-sync: pump the clip's scale (and a tiny wobble) with the audio
+    // level so the media visibly distorts in time with the beat
+    const amt = c.beatAmt != null ? c.beatAmt : 0.22;
+    const beat = c.beatSync ? (1 + audioLevel * amt * 1.5) : 1;
+    const oxAdd = c.beatSync ? Math.sin(performance.now() / 90) * audioLevel * amt * 0.18 : 0;
+    const usr = (c.scale || 1) * beat;
     const base = c.fit === "contain" ? Math.min(W / ew, H / eh)
       : c.fit === "stretch" ? 0 : Math.max(W / ew, H / eh);
     if (c.fit === "stretch") {
-      const dw = W * (c.scale || 1), dh = H * (c.scale || 1);
-      ctx.drawImage(el, (W - dw) / 2 + (c.ox || 0) * W, (H - dh) / 2 + (c.oy || 0) * H, dw, dh);
+      const dw = W * usr, dh = H * usr;
+      ctx.drawImage(el, (W - dw) / 2 + ((c.ox || 0) + oxAdd) * W, (H - dh) / 2 + (c.oy || 0) * H, dw, dh);
       return;
     }
-    const sc = base * (c.scale || 1);
+    const sc = base * usr;
     const dw = ew * sc, dh = eh * sc;
-    ctx.drawImage(el, (W - dw) / 2 + (c.ox || 0) * W, (H - dh) / 2 + (c.oy || 0) * H, dw, dh);
+    ctx.drawImage(el, (W - dw) / 2 + ((c.ox || 0) + oxAdd) * W, (H - dh) / 2 + (c.oy || 0) * H, dw, dh);
   }
 
   function clipsOnLayer(layer) {
@@ -2284,7 +2291,7 @@
   function compositeFrame(t) {
     tlCtx.clearRect(0, 0, TL.W, TL.H);
     tlCtx.fillStyle = "#000"; tlCtx.fillRect(0, 0, TL.W, TL.H);
-    for (let layer = 2; layer >= 0; layer--) {
+    for (let layer = TL.layers - 1; layer >= 0; layer--) {
       const c = clipAt(layer, t);
       if (c && c.kind !== "text") drawTLClip(tlCtx, c, t);
     }
@@ -2308,7 +2315,7 @@
     g.restore();
   }
   function drawTextClipsTop(t) {
-    for (let layer = 2; layer >= 0; layer--) {
+    for (let layer = TL.layers - 1; layer >= 0; layer--) {
       const c = clipAt(layer, t);
       if (c && c.kind === "text") drawTextClipOnCtx(ctx, c);
     }
@@ -2410,10 +2417,29 @@
       : c.kind === "color" ? "color" : c.name || c.kind;
   }
 
+  // top row = layer 0 (front-most, drawn last); bottom row = background
+  function buildTracks() {
+    const wrap = $("tl-tracks");
+    wrap.innerHTML = "";
+    for (let L = 0; L < TL.layers; L++) {
+      const t = document.createElement("div");
+      t.className = "tl-track"; t.dataset.layer = L;
+      const tag = document.createElement("span");
+      tag.className = "tl-track-tag"; tag.textContent = "L" + (L + 1);
+      t.appendChild(tag);
+      wrap.appendChild(t);
+    }
+  }
+  function addLayer() {
+    if (TL.layers >= TL.maxLayers) { toast("that's the max number of layers", 2200); return; }
+    TL.layers++;
+    renderTimeline();
+  }
+
   function renderTimeline() {
     buildRuler();
+    buildTracks();
     const pps = tlPPS();
-    document.querySelectorAll(".tl-clip").forEach((e) => e.remove());
     for (const c of TL.clips) {
       const track = document.querySelector(`.tl-track[data-layer="${c.layer}"]`);
       if (!track) continue;
@@ -2429,6 +2455,13 @@
       track.appendChild(el);
     }
     updatePlayhead();
+    $("tl-del").hidden = TL.sel == null;
+    $("tl-edit").hidden = TL.sel == null;
+  }
+  // update selection highlight WITHOUT rebuilding the DOM, so the clip nodes
+  // stay stable and native double-click (edit / apply visualizer) still fires
+  function markSelection() {
+    document.querySelectorAll(".tl-clip").forEach((e) => e.classList.toggle("sel", +e.dataset.cid === TL.sel));
     $("tl-del").hidden = TL.sel == null;
     $("tl-edit").hidden = TL.sel == null;
   }
@@ -2454,10 +2487,10 @@
 
   function placeClip(c) {
     // try each layer top→bottom at the playhead, else find any gap
-    for (let L = 0; L < 3; L++) {
+    for (let L = 0; L < TL.layers; L++) {
       if (!overlaps(L, TL.playhead, c.dur)) { c.layer = L; c.start = Math.min(TL.playhead, TL.duration - c.dur); return; }
     }
-    for (let L = 0; L < 3; L++) {
+    for (let L = 0; L < TL.layers; L++) {
       const row = clipsOnLayer(L); let cursor = 0;
       for (const o of row) { if (o.start - cursor >= c.dur) break; cursor = Math.max(cursor, o.start + o.dur); }
       if (cursor + c.dur <= TL.duration) { c.layer = L; c.start = cursor; return; }
@@ -2607,12 +2640,18 @@
     if (!clipEl) return;
     const c = TL.clips.find((x) => x.id === +clipEl.dataset.cid);
     if (!c) return;
-    TL.sel = c.id; renderTimeline();
+    TL.sel = c.id; markSelection();
     const pps = tlPPS();
     const handle = ev.target.classList.contains("tl-clip-handle") ? (ev.target.classList.contains("l") ? "l" : "r") : null;
-    const x0 = ev.clientX, s0 = c.start, d0 = c.dur, in0 = c.inPoint || 0;
-    tlTracksEl().setPointerCapture(ev.pointerId);
+    const x0 = ev.clientX, y0 = ev.clientY, s0 = c.start, d0 = c.dur, in0 = c.inPoint || 0;
+    let captured = false; // only capture once a real drag starts, so a plain
+                          // tap still fires native click / dblclick on the clip
     const move = (e) => {
+      if (!captured) {
+        if (Math.abs(e.clientX - x0) < 4 && Math.abs(e.clientY - y0) < 4) return;
+        captured = true;
+        try { tlTracksEl().setPointerCapture(ev.pointerId); } catch {}
+      }
       const dx = (e.clientX - x0) / pps;
       if (!handle) {
         let ns = snap(s0 + dx, c.id, pps);
@@ -2642,7 +2681,6 @@
     };
     tlTracksEl().addEventListener("pointermove", move);
     tlTracksEl().addEventListener("pointerup", up);
-    ev.preventDefault();
   });
 
   // scrub by dragging the ruler / empty track area
@@ -2687,7 +2725,11 @@
 
   // ---- selected clip → open its params (text/color) in the node modal ----
   tlTracksEl().addEventListener("dblclick", (ev) => {
-    const c = tlClipFromEvent(ev); if (c) openClipParams(c);
+    const c = tlClipFromEvent(ev); if (!c) return;
+    if (visualizerArmed && (c.kind === "image" || c.kind === "video")) {
+      applyVisualizerTo(c); setVisualizerArmed(false); return;
+    }
+    openClipParams(c);
   });
 
   function openClipParams(c) {
@@ -2707,6 +2749,10 @@
           () => c.oy || 0, (v) => { c.oy = v; renderComposite(); });
       add({ key: "opacity", label: "opacity", min: 0, max: 1, step: 0.02 },
           () => c.opacity != null ? c.opacity : 1, (v) => { c.opacity = v; renderComposite(); });
+      add({ key: "beatSync", label: "beat sync", type: "select", options: [["true", "on"], ["false", "off"]] },
+          () => c.beatSync ? "true" : "false", (v) => { c.beatSync = v === true || v === "true"; renderComposite(); });
+      add({ key: "beatAmt", label: "beat amount", min: 0, max: 0.6, step: 0.02 },
+          () => c.beatAmt != null ? c.beatAmt : 0.22, (v) => { c.beatAmt = v; renderComposite(); });
       if (c.kind === "video") {
         add({ key: "volume", label: "loudness", min: 0, max: 2, step: 0.02 },
             () => c.volume != null ? c.volume : 1, (v) => setClipVolume(c, v));
@@ -2747,14 +2793,14 @@
 
   // ---- view switching ----
   function activeVisualClip() {
-    for (let L = 0; L < 3; L++) {
+    for (let L = 0; L < TL.layers; L++) {
       const c = clipAt(L, TL.playhead);
       if (c && (c.kind === "image" || c.kind === "video")) return c;
     }
     return null;
   }
   function activeTextClip() {
-    for (let L = 0; L < 3; L++) {
+    for (let L = 0; L < TL.layers; L++) {
       const c = clipAt(L, TL.playhead);
       if (c && c.kind === "text") return c;
     }
@@ -2929,23 +2975,41 @@
     TL.playhead = 0; renderComposite(); updatePlayhead();
     TL._exporting = false; btn.disabled = false; btn.textContent = "export";
   }
-  function applyVisualizer() {
+  // visualizer = a beat-reactive distortion you apply to a specific photo or
+  // video clip by double-tapping it (no text is added). Pressing the button
+  // "arms" it, then the next double-tap on an image/video clip turns it on.
+  let visualizerArmed = false;
+  function setVisualizerArmed(on) {
+    visualizerArmed = on;
+    $("tl-visualizer").classList.toggle("armed", on);
+  }
+  function toggleVisualizerArm() {
+    setVisualizerArmed(!visualizerArmed);
+    if (visualizerArmed) {
+      const hasMedia = TL.clips.some((c) => c.kind === "image" || c.kind === "video");
+      toast(hasMedia
+        ? "double-tap a photo or video clip to make it pulse & distort to the beat"
+        : "add a photo or video first, then double-tap it to sync it to the beat", 4200);
+    }
+  }
+  function applyVisualizerTo(c) {
+    // the artsy audio-reactive glitch (runs on the whole composite)…
     chain.dither.enabled = true;
     Object.assign(chain.dither.params, { algorithm: "bayer8", palette: "flareware", pixelSize: 3, contrast: 1.15 });
     chain.rgbshift.enabled = true; Object.assign(chain.rgbshift.params, { amount: 4, angle: 0 });
     chain.slice.enabled = true; Object.assign(chain.slice.params, { slices: 6, intensity: 0.4, channelTear: true });
     chain.wave.enabled = true; Object.assign(chain.wave.params, { amplitude: 6, frequency: 3, axis: "horizontal" });
     audioReact.amount = 0.95;
+    // …plus a per-clip beat pump on the media you double-tapped
+    c.beatSync = true; if (c.beatAmt == null) c.beatAmt = 0.22;
     syncControls();
-    if (!TL.clips.some((c) => c.kind === "text")) {
-      addClipObj({ kind: "text", style: { text: "type your lyrics\nhere", size: 9, x: 0.5, y: 0.82, color: "#ffffff", align: "center", weight: "bold", family: "serif", pulse: 0.6 }, start: 0, dur: Math.max(3, projectEnd()), layer: 0 });
-    }
     renderComposite();
-    const hasAudio = TL.clips.some((c) => c.kind === "audio" || c.kind === "video");
-    toast(hasAudio ? "visualizer on — hit play, it distorts to the beat · edit the lyrics clip"
-      : "visualizer on — add an audio track, then play to make it react", 4600);
+    const hasAudio = TL.clips.some((x) => x.kind === "audio" || x.kind === "video");
+    toast(hasAudio ? "beat-sync on — hit play, this clip distorts to the beat"
+      : "beat-sync on — add an audio track, then play to make it react", 4200);
   }
-  $("tl-visualizer").addEventListener("click", applyVisualizer);
+  $("tl-visualizer").addEventListener("click", toggleVisualizerArm);
+  $("tl-add-layer").addEventListener("click", addLayer);
   $("tl-aspect").addEventListener("change", (e) => setProjectAspect(e.target.value));
   $("tl-export").addEventListener("click", (ev) => {
     ev.stopPropagation();

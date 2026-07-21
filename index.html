@@ -108,8 +108,9 @@
         <div class="tl-bar">
           <button id="tl-play" class="nbtn ico-btn" type="button"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2 1.5v9l8-4.5z" fill="currentColor"/></svg><span>play</span></button>
           <span id="tl-time" class="tl-time">0.0 / 0.0s</span>
-          <span class="tl-hint">3 layers · magnetic · max 15s</span>
+          <span class="tl-hint">magnetic timeline · max 15s</span>
           <button id="tl-visualizer" class="nbtn ico-btn" type="button"><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 2l1.7 5.3L19 9l-5.3 1.7L12 16l-1.7-5.3L5 9l5.3-1.7z" fill="currentColor"/><circle cx="18.5" cy="17.5" r="1.5" fill="currentColor"/></svg><span>visualizer</span></button>
+          <button id="tl-add-layer" class="nbtn ico-btn" type="button" title="add a layer"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>layer</span></button>
           <span class="tl-spacer"></span>
           <button id="tl-edit" class="nbtn" type="button" hidden>edit clip</button>
           <button id="tl-del" class="nbtn" type="button" hidden>delete clip</button>
@@ -136,11 +137,7 @@
         </div>
         <div id="tl-scroll" class="tl-scroll">
           <div id="tl-ruler" class="tl-ruler"></div>
-          <div id="tl-tracks" class="tl-tracks">
-            <div class="tl-track" data-layer="0"><span class="tl-track-tag">L3</span></div>
-            <div class="tl-track" data-layer="1"><span class="tl-track-tag">L2</span></div>
-            <div class="tl-track" data-layer="2"><span class="tl-track-tag">L1</span></div>
-          </div>
+          <div id="tl-tracks" class="tl-tracks"></div>
           <div id="tl-playhead" class="tl-playhead"></div>
         </div>
       </div>
