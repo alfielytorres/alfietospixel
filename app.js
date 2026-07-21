@@ -40,7 +40,10 @@
   for (const e of Effects.REGISTRY) {
     chain[e.id] = { enabled: false, params: structuredClone(e.defaults) };
   }
-  chain.dither.enabled = true;
+  // the editor starts clean — effects are opt-in (per clip via the node view,
+  // or project-wide via the visualizer); the old one-shot tool defaulted to
+  // dither but that crushed every fresh timeline to 1-bit
+  chain.dither.enabled = false;
 
   // ---- overlays: ORBS/LINES are full-frame modules that react to the
   // image; STARs are individual draggable sprites ----
@@ -60,13 +63,13 @@
     (typeof TL !== "undefined" && TL.clips && TL.clips.some((c) => (c.kind === "audio" || c.kind === "video") && c.el && !c.el.paused));
 
   // per-frame chain modulated by the beat, for realtime preview/record only
-  function beatChain() {
-    if (!audioActive()) return chain;
+  function beatChain(src = chain) {
+    if (!audioActive()) return src;
     const lvl = audioLevel * audioReact.amount;
-    if (lvl < 0.001) return chain;
+    if (lvl < 0.001) return src;
     const c = {};
     for (const e of Effects.REGISTRY) {
-      const st = chain[e.id];
+      const st = src[e.id];
       if (!st.enabled) { c[e.id] = st; continue; }
       const p = { ...st.params };
       if (e.id === "rgbshift") p.amount = st.params.amount * (1 + lvl * 2.2);
@@ -1795,11 +1798,12 @@
     { id: "text", label: "TEXT", kind: "module" },
   ];
   function nodeEnabled(def) {
-    return def.kind === "effect" ? chain[def.id].enabled : overlayModules[def.id].enabled;
+    return def.kind === "effect" ? fxChain()[def.id].enabled : fxMods()[def.id].enabled;
   }
   function setNodeEnabled(def, on) {
-    if (def.kind === "effect") chain[def.id].enabled = on;
-    else overlayModules[def.id].enabled = on;
+    if (def.kind === "effect") fxChain()[def.id].enabled = on;
+    else fxMods()[def.id].enabled = on;
+    if (fxClip) { markFxClips(); return; } // legacy panel mirrors the master chain only
     const sel = def.kind === "effect"
       ? `.effect[data-effect="${def.id}"] .effect-toggle`
       : `[data-overlay-module="${def.id}"] .effect-toggle`;
@@ -1808,40 +1812,57 @@
     const box = t && t.closest(".effect");
     if (box) box.classList.toggle("enabled", on);
   }
+  // badge timeline clips that carry their own fx
+  function markFxClips() {
+    document.querySelectorAll(".tl-clip").forEach((el) => {
+      const c = TL.clips.find((x) => x.id === +el.dataset.cid);
+      el.classList.toggle("has-fx", !!(c && clipFxActive(c)));
+    });
+  }
 
   // the ordered pipeline: source, then each enabled step, then result
   function pipeline() {
-    const list = [{ id: "__source", kind: "source", label: "source" }];
+    const ch = fxChain(), mods = fxMods();
+    const list = [{ id: "__source", kind: "source", label: fxClip ? clipLabel(fxClip) : "source" }];
     for (const e of Effects.REGISTRY) {
-      if (chain[e.id].enabled) list.push({ id: e.id, kind: "effect", label: e.name });
+      if (ch[e.id].enabled) list.push({ id: e.id, kind: "effect", label: e.name });
     }
-    if (overlayModules.orbs.enabled) list.push({ id: "orbs", kind: "module", label: "ORBS" });
-    if (overlayModules.lines.enabled) list.push({ id: "lines", kind: "module", label: "LINES" });
-    if (overlayModules.text.enabled) list.push({ id: "text", kind: "module", label: "TEXT" });
-    if (stars.length) list.push({ id: "__stars", kind: "stars", label: `stars (${stars.length})` });
+    if (mods.orbs.enabled) list.push({ id: "orbs", kind: "module", label: "ORBS" });
+    if (mods.lines.enabled) list.push({ id: "lines", kind: "module", label: "LINES" });
+    if (mods.text.enabled) list.push({ id: "text", kind: "module", label: "TEXT" });
+    if (!fxClip && stars.length) list.push({ id: "__stars", kind: "stars", label: `stars (${stars.length})` });
     list.push({ id: "__result", kind: "result", label: "result" });
     return list;
   }
 
-  // small copy of the current source/frame to render node thumbnails on
-  function thumbBase() {
+  // small copy of the current source/frame to render node thumbnails on —
+  // per-clip mode renders that clip ALONE so the graph shows its isolated fx
+  function thumbBase(W) {
     if (!TL.clips || !TL.clips.length) return null;
-    compositeFrame(TL.playhead); // fills tlCanvas at TL.W x TL.H
-    const W = 150, H = Math.max(1, Math.round(W * TL.H / TL.W));
-    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    if (fxClip) {
+      const t = Math.max(fxClip.start, Math.min(TL.playhead, fxClip.start + fxClip.dur - 0.01));
+      tlCtx.clearRect(0, 0, TL.W, TL.H);
+      tlCtx.fillStyle = "#000"; tlCtx.fillRect(0, 0, TL.W, TL.H);
+      drawTLClip(tlCtx, fxClip, t);
+    } else {
+      compositeFrame(TL.playhead); // fills tlCanvas at TL.W x TL.H
+    }
+    const TW = W || 150, TH = Math.max(1, Math.round(TW * TL.H / TL.W));
+    const c = document.createElement("canvas"); c.width = TW; c.height = TH;
     const g = c.getContext("2d");
-    g.drawImage(tlCanvas, 0, 0, W, H);
-    return g.getImageData(0, 0, W, H);
+    g.drawImage(tlCanvas, 0, 0, TW, TH);
+    return g.getImageData(0, 0, TW, TH);
   }
 
   // apply the pipeline up to (and including) list index k onto src
   function applyUpTo(src, list, k) {
+    const ch = fxChain(), mods = fxMods();
     const c = {};
-    for (const e of Effects.REGISTRY) c[e.id] = { enabled: false, params: chain[e.id].params };
+    for (const e of Effects.REGISTRY) c[e.id] = { enabled: false, params: ch[e.id].params };
     const m = {
-      orbs: { enabled: false, params: overlayModules.orbs.params },
-      lines: { enabled: false, params: overlayModules.lines.params },
-      text: { enabled: false, params: overlayModules.text.params },
+      orbs: { enabled: false, params: mods.orbs.params },
+      lines: { enabled: false, params: mods.lines.params },
+      text: { enabled: false, params: mods.text.params },
     };
     let useStars = false;
     for (let i = 1; i <= k; i++) {
@@ -1885,6 +1906,31 @@
   }
   function nodeDocked() { return document.body.classList.contains("node-docked"); }
 
+  // ---- per-clip effects: the node view edits ONE clip's chain, not the
+  // whole project (like FCP's effects applying to the selected clip) ----
+  let fxClip = null;
+  function ensureClipFx(c) {
+    if (!c.fx) {
+      const ch = {};
+      for (const e of Effects.REGISTRY) ch[e.id] = { enabled: false, params: structuredClone(e.defaults) };
+      c.fx = {
+        chain: ch,
+        mods: {
+          orbs: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.orbs.defaults) },
+          lines: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.lines.defaults) },
+          text: { enabled: false, params: structuredClone(Effects.OVERLAY_MODULES.text.defaults) },
+        },
+      };
+    }
+    return c.fx;
+  }
+  function fxChain() { return fxClip ? ensureClipFx(fxClip).chain : chain; }
+  function fxMods() { return fxClip ? ensureClipFx(fxClip).mods : overlayModules; }
+  function clipFxActive(c) {
+    return !!(c.fx && (Effects.REGISTRY.some((e) => c.fx.chain[e.id].enabled)
+      || c.fx.mods.orbs.enabled || c.fx.mods.lines.enabled || c.fx.mods.text.enabled));
+  }
+
   function renderNodeGraph() {
     if (!nodeVisible()) return;
     const graph = $("node-graph");
@@ -1898,18 +1944,25 @@
 
       const title = document.createElement("div");
       title.className = "node-title node-drag";
-      title.textContent = n.kind === "result" ? "result · 1:1" : n.label.toLowerCase();
+      title.textContent = n.kind === "result"
+        ? (fxClip ? `result · ${clipLabel(fxClip)}` : "result")
+        : n.label.toLowerCase();
       card.appendChild(title);
 
       if (n.kind === "result") {
         const slot = document.createElement("div");
         slot.className = "node-result-slot";
-        if (nodeDocked()) {
-          // docked: the live canvas stays in the preview; show a thumbnail here
+        if (fxClip || nodeDocked()) {
+          // the live canvas stays in the preview; the result node shows the
+          // clip (or composite) with the full pipeline applied
           const t = document.createElement("canvas");
-          t.className = "node-thumb";
-          t.width = 150; t.height = canvas.width ? Math.max(40, Math.round(150 * canvas.height / canvas.width)) : 100;
-          try { if (canvas.width) t.getContext("2d").drawImage(canvas, 0, 0, t.width, t.height); } catch { /* not ready */ }
+          t.className = "node-thumb node-result-thumb";
+          const RW = fxClip && !nodeDocked() ? 260 : 150;
+          const rbase = base && RW !== 150 ? thumbBase(RW) : base;
+          if (rbase) {
+            t.width = rbase.width; t.height = rbase.height;
+            t.getContext("2d").putImageData(applyUpTo(rbase, list, list.length - 1), 0, 0);
+          } else { t.width = RW; t.height = Math.round(RW * 9 / 16); }
           slot.appendChild(t);
         } else {
           slot.appendChild(canvas);
@@ -1917,13 +1970,20 @@
         card.appendChild(slot);
         const acts = document.createElement("div");
         acts.className = "node-actions";
-        acts.append(
-          nvBtn("seed", () => { $("reroll-btn").click(); }),
-          nvBtn("random", () => { $("random-btn").click(); }),
-          nvBtn("png", () => $("download-btn").click()),
-          nvBtn("svg", () => $("svg-btn").click()),
-        );
-        if (mode === "video" || mode === "live") {
+        if (fxClip) {
+          const clr = nvBtn("clear fx", () => {
+            fxClip.fx = null; markFxClips(); renderComposite(); renderNodeGraph();
+          });
+          acts.append(clr);
+        } else {
+          acts.append(
+            nvBtn("seed", () => { $("reroll-btn").click(); }),
+            nvBtn("random", () => { $("random-btn").click(); }),
+            nvBtn("png", () => $("download-btn").click()),
+            nvBtn("svg", () => $("svg-btn").click()),
+          );
+        }
+        if (!fxClip && (mode === "video" || mode === "live")) {
           const exp = nvBtn(mode === "live" ? "record" : "export mov", () => {
             if (mode === "video") $("export-video-btn").click();
             else toggleLiveRecord();
@@ -1944,8 +2004,11 @@
           tabs.className = "node-source-tabs";
           const b = document.createElement("button");
           b.type = "button"; b.className = "src-tab active";
-          b.textContent = "timeline · edit";
-          b.addEventListener("click", (ev) => { ev.stopPropagation(); enterEditor(); });
+          b.textContent = fxClip ? "clip settings" : "timeline · edit";
+          b.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            if (fxClip) openClipParams(fxClip); else enterEditor();
+          });
           tabs.appendChild(b);
           card.appendChild(tabs);
         } else {
@@ -2082,15 +2145,17 @@
       });
       menu.appendChild(b);
     }
-    const star = document.createElement("button");
-    star.type = "button"; star.textContent = "+ star overlay";
-    star.addEventListener("click", () => {
-      menu.hidden = true;
-      addStar();
-      renderNodeGraph();
-    });
-    menu.appendChild(star);
-    if (!hasAny && !stars.length) { /* still show star option */ }
+    if (!fxClip) {
+      const star = document.createElement("button");
+      star.type = "button"; star.textContent = "+ star overlay";
+      star.addEventListener("click", () => {
+        menu.hidden = true;
+        addStar();
+        renderNodeGraph();
+      });
+      menu.appendChild(star);
+    }
+    if (!hasAny && !menu.children.length) { menu.hidden = true; return; }
 
     const v = $("node-view").getBoundingClientRect();
     const a = anchor.getBoundingClientRect();
@@ -2102,6 +2167,27 @@
 
   function openNodeParams(def) {
     closeNodeParams();
+    if (fxClip && (def.kind === "effect" || def.kind === "module")) {
+      // per-clip: fresh rows bound to THIS clip's params (the legacy panel
+      // below is wired to the master chain and can't be reused)
+      const fx = ensureClipFx(fxClip);
+      const store = def.kind === "effect" ? fx.chain[def.id] : fx.mods[def.id];
+      const defn = def.kind === "effect"
+        ? Effects.REGISTRY.find((e) => e.id === def.id)
+        : Effects.OVERLAY_MODULES[def.id];
+      const body = $("node-params-body");
+      body.innerHTML = "";
+      for (const p of (defn.params || [])) {
+        if (p.type === "colors") continue; // multi-color rows are master-panel only
+        body.appendChild(buildParamRow(p, () => store.params[p.key],
+          (v) => { store.params[p.key] = v; renderComposite(); scheduleThumbs(); }));
+      }
+      $("node-params-title").textContent = `${def.label.toLowerCase()} · ${clipLabel(fxClip)}`;
+      $("node-backdrop").hidden = false;
+      $("node-params").hidden = false;
+      nodeParamsStash = null;
+      return;
+    }
     let node;
     if (def.kind === "effect") node = document.querySelector(`.effect[data-effect="${def.id}"]`);
     else if (def.kind === "module") node = document.querySelector(`[data-overlay-module="${def.id}"]`);
@@ -2134,8 +2220,12 @@
       const th = card.querySelector(".node-thumb");
       if (!th) return;
       if (card.classList.contains("node-result")) {
-        // docked live result thumbnail — mirror the preview canvas
-        try { if (canvas.width) th.getContext("2d").drawImage(canvas, 0, 0, th.width, th.height); } catch { /* not ready */ }
+        // result thumbnail: whole pipeline applied at the thumb's own size
+        const rbase = th.width !== base.width ? thumbBase(th.width) : base;
+        if (rbase) {
+          if (th.height !== rbase.height) th.height = rbase.height;
+          th.getContext("2d").putImageData(applyUpTo(rbase, list, list.length - 1), 0, 0);
+        }
         return;
       }
       if (th.height !== base.height) th.height = base.height;
@@ -2168,6 +2258,8 @@
       $("ev-preview").appendChild(canvas);                       // preview keeps the canvas
       $("editor-view").insertBefore($("node-view"), $("timeline"));
       $("node-view").hidden = false;
+      const dt = document.querySelector(".node-dock-title");
+      if (dt) dt.textContent = fxClip ? `effects · ${clipLabel(fxClip)}` : "effects";
       renderNodeGraph();
       requestAnimationFrame(() => { renderTimeline(); renderComposite(); layoutNodes(); });
     } else { // full
@@ -2207,11 +2299,16 @@
     raf: 0, lastPerf: 0, W: 960, H: 540, sel: null, nextId: 1, aspect: "16:9",
     layers: 3, maxLayers: 20,
   };
-  const ASPECT_WH = { "16:9": [960, 540], "9:16": [540, 960], "1:1": [720, 720] };
+  const ASPECT_WH = {
+    "16:9": [960, 540], "9:16": [540, 960], "1:1": [720, 720],
+    "4:3": [720, 540], "3:4": [540, 720],
+  };
   const EXPORT_SIZES = {
     "16:9": [["4K UHD · 3840×2160", 3840, 2160], ["1080p · 1920×1080", 1920, 1080], ["720p · 1280×720", 1280, 720]],
     "9:16": [["1080×1920 · reels / tiktok / shorts", 1080, 1920], ["720×1280", 720, 1280]],
     "1:1":  [["1080×1080 · square", 1080, 1080], ["720×720", 720, 720]],
+    "4:3":  [["1440×1080", 1440, 1080], ["960×720", 960, 720]],
+    "3:4":  [["1080×1440", 1080, 1440], ["720×960", 720, 960]],
   };
   function setProjectAspect(a, keepMediaFit) {
     TL.aspect = a;
@@ -2223,6 +2320,262 @@
   const tlCanvas = document.createElement("canvas");
   const tlCtx = tlCanvas.getContext("2d", { willReadFrequently: true });
   const SNAP_PX = 7;
+
+  // =====================================================================
+  // BACKGROUNDS — procedural, math-driven animated templates for the
+  // background card. Everything is a pure function of clip-local time, so
+  // scrubbing is deterministic and exports match the preview exactly.
+  // =====================================================================
+  const bgLow = document.createElement("canvas");
+  const bgLowCtx = bgLow.getContext("2d");
+  function bgHex(h, fb) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(h || "").trim());
+    const n = m ? parseInt(m[1], 16) : fb;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const bgMix = (a, b, t) => a + (b - a) * t;
+  const bgClamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const bgHash = (n) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+  // smooth 2D value noise + 3-octave fbm (deterministic)
+  function bgNoise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const h = (a, b) => bgHash(a * 157.31 + b * 113.97);
+    return bgMix(bgMix(h(xi, yi), h(xi + 1, yi), u), bgMix(h(xi, yi + 1), h(xi + 1, yi + 1), u), v);
+  }
+  function bgFbm(x, y) {
+    return bgNoise(x, y) * 0.55 + bgNoise(x * 2.07, y * 2.07) * 0.28 + bgNoise(x * 4.13, y * 4.13) * 0.17;
+  }
+  // render a per-pixel field at low resolution and upscale smoothly — this is
+  // what keeps the math templates cheap enough for 30fps playback
+  function bgField(g, W, H, res, shade) {
+    const w = res, h = Math.max(8, Math.round(res * H / W));
+    if (bgLow.width !== w) bgLow.width = w;
+    if (bgLow.height !== h) bgLow.height = h;
+    const img = bgLowCtx.createImageData(w, h);
+    const d = img.data;
+    let i = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++, i += 4) {
+      shade(x / w, y / h, d, i);
+      d[i + 3] = 255;
+    }
+    bgLowCtx.putImageData(img, 0, 0);
+    const sm = g.imageSmoothingEnabled;
+    g.imageSmoothingEnabled = true;
+    g.drawImage(bgLow, 0, 0, W, H);
+    g.imageSmoothingEnabled = sm;
+  }
+
+  const BG_TEMPLATES = [
+    { id: "solid", name: "solid color",
+      draw(g, W, H, t, c) { g.fillStyle = c.color || "#8f78ff"; g.fillRect(0, 0, W, H); } },
+
+    { id: "flow", name: "gradient flow",
+      draw(g, W, H, t, c, lvl) {
+        const [r1, g1, b1] = bgHex(c.color, 0x8f78ff), [r2, g2, b2] = bgHex(c.color2, 0xff7854);
+        g.fillStyle = `rgb(${r1 * 0.14 | 0},${g1 * 0.14 | 0},${b1 * 0.16 | 0})`; g.fillRect(0, 0, W, H);
+        const R = Math.max(W, H);
+        const orbs = [[r1, g1, b1, 0.0], [r2, g2, b2, 2.1], [(r1 + r2) >> 1, (g1 + g2) >> 1, 255, 4.2]];
+        g.globalCompositeOperation = "screen";
+        for (let i = 0; i < 3; i++) {
+          const [rr, gg, bb, ph] = orbs[i];
+          const cx = W * (0.5 + 0.38 * Math.sin(t * 0.43 + ph)), cy = H * (0.5 + 0.38 * Math.cos(t * 0.31 + ph * 1.4));
+          const rad = R * (0.5 + 0.12 * Math.sin(t * 0.6 + ph)) * (1 + lvl * 0.5);
+          const gr = g.createRadialGradient(cx, cy, 0, cx, cy, rad);
+          gr.addColorStop(0, `rgba(${rr},${gg},${bb},0.85)`);
+          gr.addColorStop(1, "rgba(0,0,0,0)");
+          g.fillStyle = gr; g.fillRect(0, 0, W, H);
+        }
+        g.globalCompositeOperation = "source-over";
+      } },
+
+    { id: "plasma", name: "plasma",
+      draw(g, W, H, t, c, lvl) {
+        const A = bgHex(c.color, 0x1a0b2e), B = bgHex(c.color2, 0xff2e88);
+        const T = t * 0.9, boost = 1 + lvl * 0.8;
+        bgField(g, W, H, 148, (u, v, d, i) => {
+          const x = u * 10, y = v * 10 * (H / W) * (W / H);
+          let s = Math.sin(x * 1.1 + T) + Math.sin(y * 1.3 - T * 1.25)
+            + Math.sin((x + y) * 0.8 + T * 0.6)
+            + Math.sin(Math.hypot(x - 5, y - 5 * (H / W)) * 1.5 - T * 1.7);
+          const n = bgClamp((s / 4 + 1) / 2 * boost);
+          const w2 = bgClamp(n * 2 - 1);          // white-hot top end
+          d[i] = bgMix(bgMix(A[0], B[0], n), 255, w2 * 0.65);
+          d[i + 1] = bgMix(bgMix(A[1], B[1], n), 255, w2 * 0.65);
+          d[i + 2] = bgMix(bgMix(A[2], B[2], n), 255, w2 * 0.65);
+        });
+      } },
+
+    { id: "ferro", name: "ferro groove",
+      draw(g, W, H, t, c, lvl) {
+        // ferrofluid labyrinth: stripes of a drifting noise field, masked and
+        // lit like glossy 3D ridges (light from the top-left)
+        const B = bgHex(c.color, 0xd23b18);
+        const T = t * 0.22, freq = 5.5, e = 0.012;
+        const band = (u, v) => {
+          const n = bgFbm(u * 3.1 + Math.sin(T * 0.7) * 0.4 + T * 0.35, v * 3.1 + Math.cos(T * 0.5) * 0.4)
+            + 0.22 * Math.sin(u * 5 + T) * Math.sin(v * 5 - T * 0.8);
+          return Math.sin(n * freq * Math.PI * (1 + lvl * 0.25));
+        };
+        bgField(g, W, H, 168, (u, v, d, i) => {
+          const b0 = band(u, v);
+          const m = bgClamp((b0 + 0.25) * 2.2);                    // blob mask
+          const light = bgClamp(0.5 + (band(u - e, v - e) - band(u + e, v + e)) * 2.2); // fake normal shading
+          const spec = Math.pow(light, 10) * 1.1;                  // gloss
+          const rr = m * (B[0] * (0.25 + light * 0.9) + 255 * spec * 0.7);
+          const gg = m * (B[1] * (0.25 + light * 0.9) + 220 * spec * 0.7);
+          const bb = m * (B[2] * (0.25 + light * 0.9) + 200 * spec * 0.7);
+          d[i] = Math.min(255, rr + 8); d[i + 1] = Math.min(255, gg + 4); d[i + 2] = Math.min(255, bb + 4);
+        });
+      } },
+
+    { id: "dots", name: "led dots",
+      draw(g, W, H, t, c, lvl) {
+        const B = bgHex(c.color, 0xd8202a);
+        g.fillStyle = `rgb(${B[0] * 0.16 | 0},${B[1] * 0.12 | 0},${B[2] * 0.12 | 0})`; g.fillRect(0, 0, W, H);
+        const s = Math.max(10, Math.round(W / 64));
+        g.fillStyle = `rgb(${B[0]},${B[1]},${B[2]})`;
+        for (let gy = 0; gy * s < H + s; gy++) for (let gx = 0; gx * s < W + s; gx++) {
+          const w = Math.sin(t * 2.2 + gx * 0.55 + Math.sin(gy * 0.35 + t) * 1.8) * 0.5 + 0.5;
+          const r = s * 0.34 * (0.35 + 0.65 * w) * (1 + lvl * 0.7);
+          if (r < 0.6) continue;
+          g.globalAlpha = 0.35 + 0.65 * w;
+          g.beginPath(); g.arc(gx * s + s / 2, gy * s + s / 2, r, 0, 6.2832); g.fill();
+        }
+        g.globalAlpha = 1;
+      } },
+
+    { id: "space", name: "space dust",
+      draw(g, W, H, t, c, lvl) {
+        const B = bgHex(c.color, 0xd8b45a);
+        g.fillStyle = "#050505"; g.fillRect(0, 0, W, H);
+        const vg = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
+        vg.addColorStop(0, "rgba(30,26,14,0.9)"); vg.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = vg; g.fillRect(0, 0, W, H);
+        g.globalCompositeOperation = "lighter";
+        const N = 520;
+        for (let i = 0; i < N; i++) {
+          const u = bgHash(i), v = bgHash(i + 7777), sp = 0.012 + u * 0.02;
+          const x = ((u + t * sp) % 1) * W;
+          const y = (v + 0.10 * Math.sin(t * 0.5 + u * 21 + (x / W) * 7) + 0.03 * Math.sin(t * 1.7 + i)) % 1 * H;
+          const tw = 0.5 + 0.5 * Math.sin(t * 2.6 + i * 1.7);
+          const a = (0.12 + 0.5 * tw) * (1 + lvl);
+          g.fillStyle = `rgba(${B[0]},${B[1]},${B[2]},${Math.min(1, a)})`;
+          const sz = 1 + Math.floor(bgHash(i + 31) * 2 + tw);
+          g.fillRect(x, y < 0 ? y + H : y, sz, sz);
+        }
+        g.globalCompositeOperation = "source-over";
+      } },
+
+    { id: "clouds", name: "clouds",
+      draw(g, W, H, t, c) {
+        const S = bgHex(c.color, 0x6f9fd8), C = bgHex(c.color2, 0xffffff);
+        const T = t * 0.05;
+        bgField(g, W, H, 132, (u, v, d, i) => {
+          const f = bgFbm(u * 3 + T * 3, v * 2.2 - T * 1.2) * 0.7 + bgFbm(u * 7 - T * 2, v * 6 + T) * 0.3;
+          const k = bgClamp((f - 0.38) * 3.2);
+          const sky = 1 - v * 0.5;
+          d[i] = bgMix(S[0] * sky, C[0], k);
+          d[i + 1] = bgMix(S[1] * sky, C[1], k);
+          d[i + 2] = bgMix(S[2] * sky, C[2], k);
+        });
+      } },
+
+    { id: "geo", name: "geo shapes",
+      draw(g, W, H, t, c, lvl) {
+        const B = bgHex(c.color, 0xd8202a);
+        g.fillStyle = `rgb(${B[0]},${B[1]},${B[2]})`; g.fillRect(0, 0, W, H);
+        const cell = Math.max(90, W / 6), lw = Math.max(1.5, W / 480);
+        const drift = Math.sin(t * 0.4) * cell * 0.12;
+        const shape = (kind, s) => {
+          g.beginPath();
+          if (kind === 0) { g.moveTo(-s, s); g.lineTo(s, s); g.lineTo(-s, -s); g.closePath(); }
+          else if (kind === 1) { g.arc(0, 0, s, 0, 6.2832); }
+          else if (kind === 2) { g.arc(0, s * 0.5, s, Math.PI, 0); g.closePath(); }
+          else { g.rect(-s, -s, s * 2, s * 2); }
+          g.stroke();
+        };
+        for (let gy = 0; gy * cell < H + cell; gy++) for (let gx = 0; gx * cell < W + cell; gx++) {
+          const hsh = bgHash(gx * 13 + gy * 71);
+          const kind = Math.floor(hsh * 4);
+          const s = cell * 0.28 * (1 + 0.1 * Math.sin(t * 1.3 + hsh * 9) + lvl * 0.3);
+          g.save();
+          g.translate(gx * cell + cell / 2 + drift * (gy % 2 ? 1 : -1), gy * cell + cell / 2);
+          g.rotate(Math.sin(t * 0.5 + hsh * 6.28) * 0.35);
+          g.lineWidth = lw;
+          // chromatic fringe: offset cyan + magenta ghosts behind a white line
+          g.strokeStyle = "rgba(80,255,255,0.7)"; g.save(); g.translate(-lw, 0); shape(kind, s); g.restore();
+          g.strokeStyle = "rgba(255,80,255,0.7)"; g.save(); g.translate(lw, 0); shape(kind, s); g.restore();
+          g.strokeStyle = "rgba(255,255,255,0.92)"; shape(kind, s);
+          g.restore();
+        }
+      } },
+
+    { id: "burst", name: "particle burst",
+      draw(g, W, H, t, c, lvl) {
+        const B = bgHex(c.color, 0xff3b1c);
+        g.fillStyle = "#070404"; g.fillRect(0, 0, W, H);
+        g.globalCompositeOperation = "lighter";
+        const N = 650, R = Math.min(W, H) * (0.52 + lvl * 0.25);
+        for (let i = 0; i < N; i++) {
+          const u = bgHash(i), v = bgHash(i + 4242);
+          const ang = u * 6.2832 + Math.sin(t * 0.7 + i) * 0.05;
+          const rad = (v + t * (0.10 + u * 0.08)) % 1;
+          const fall = (1 - rad) * (1 - rad);
+          const x = W / 2 + Math.cos(ang) * rad * R, y = H / 2 + Math.sin(ang) * rad * R;
+          g.fillStyle = `rgba(${B[0]},${Math.min(255, B[1] + fall * 120) | 0},${B[2]},${(0.08 + fall * 0.75).toFixed(3)})`;
+          const sz = 1 + fall * 2.5;
+          g.fillRect(x, y, sz, sz);
+        }
+        g.globalCompositeOperation = "source-over";
+      } },
+  ];
+  const BG_INDEX = {};
+  for (const tpl of BG_TEMPLATES) BG_INDEX[tpl.id] = tpl;
+
+  function drawBackgroundClip(g, c, lt) {
+    const tpl = BG_INDEX[c.template] || BG_INDEX.solid;
+    const T = lt * (c.speed == null ? 1 : c.speed);
+    const lvl = audioLevel * (c.beat == null ? 0.4 : c.beat);
+    tpl.draw(g, TL.W, TL.H, T, c, lvl);
+    g.globalCompositeOperation = "source-over";
+    g.globalAlpha = 1;
+  }
+
+  // ---- template picker: a grid of live animated previews ----
+  let bgPickerRaf = 0, bgPickerCb = null;
+  function openBgPicker(cb) {
+    bgPickerCb = cb;
+    const grid = $("bg-picker-grid");
+    grid.innerHTML = "";
+    const previews = [];
+    for (const tpl of BG_TEMPLATES) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "bg-tpl";
+      const cv = document.createElement("canvas");
+      cv.width = 200; cv.height = 112;
+      const name = document.createElement("span");
+      name.className = "bg-tpl-name"; name.textContent = tpl.name;
+      b.append(cv, name);
+      b.addEventListener("click", () => { closeBgPicker(); if (bgPickerCb) bgPickerCb(tpl.id); });
+      grid.appendChild(b);
+      previews.push([tpl, cv.getContext("2d")]);
+    }
+    $("bg-picker").hidden = false;
+    const t0 = performance.now();
+    (function anim() {
+      const t = (performance.now() - t0) / 1000;
+      for (const [tpl, g] of previews) {
+        tpl.draw(g, 200, 112, t, { color: undefined, color2: undefined }, 0);
+        g.globalCompositeOperation = "source-over"; g.globalAlpha = 1;
+      }
+      bgPickerRaf = requestAnimationFrame(anim);
+    })();
+  }
+  function closeBgPicker() {
+    cancelAnimationFrame(bgPickerRaf);
+    $("bg-picker").hidden = true;
+  }
   let mixCtx = null, mixDest = null, mixAnalyser = null, mixData = null;
   function ensureMix() {
     if (!mixCtx) {
@@ -2309,7 +2662,7 @@
     else if (c.kind === "video") {
       try { drawVisual(ctx, c.el, c.el.videoWidth, c.el.videoHeight, c); } catch { /* not ready */ }
     } else if (c.kind === "color") {
-      ctx.fillStyle = c.color; ctx.fillRect(0, 0, TL.W, TL.H);
+      drawBackgroundClip(ctx, c, lt);
     } else if (c.kind === "text") {
       const s = c.style;
       const pulse = 1 + audioLevel * (s.pulse || 0) * 0.6;
@@ -2325,12 +2678,33 @@
     ctx.globalAlpha = 1;
   }
 
+  // scratch surface for applying one clip's fx before it joins the stack
+  const fxCan = document.createElement("canvas");
+  const fxCtx = fxCan.getContext("2d", { willReadFrequently: true });
+  function drawClipIntoComposite(c, t) {
+    if (!clipFxActive(c)) { drawTLClip(tlCtx, c, t); return; }
+    if (fxCan.width !== TL.W) fxCan.width = TL.W;
+    if (fxCan.height !== TL.H) fxCan.height = TL.H;
+    fxCtx.clearRect(0, 0, TL.W, TL.H);
+    drawTLClip(fxCtx, c, t);
+    const live = TL.playing || audioActive();
+    let img = fxCtx.getImageData(0, 0, TL.W, TL.H);
+    img = Effects.apply(img, live ? beatChain(c.fx.chain) : c.fx.chain,
+      frameSeedAt(Math.floor(t * EXPORT_FPS)) + c.id * 101);
+    img = Effects.renderOverlayStack(img, c.fx.mods, [], live, live ? audioLevel : 0);
+    fxCtx.putImageData(img, 0, 0);
+    tlCtx.drawImage(fxCan, 0, 0);
+  }
   function compositeFrame(t) {
+    // a fresh <canvas> is 300×150 — make sure the scratch buffer matches the
+    // project dims even if the aspect was never explicitly changed
+    if (tlCanvas.width !== TL.W) tlCanvas.width = TL.W;
+    if (tlCanvas.height !== TL.H) tlCanvas.height = TL.H;
     tlCtx.clearRect(0, 0, TL.W, TL.H);
     tlCtx.fillStyle = "#000"; tlCtx.fillRect(0, 0, TL.W, TL.H);
     for (let layer = TL.layers - 1; layer >= 0; layer--) {
       const c = clipAt(layer, t);
-      if (c && c.kind !== "text") drawTLClip(tlCtx, c, t);
+      if (c && c.kind !== "text") drawClipIntoComposite(c, t);
     }
     return tlCtx.getImageData(0, 0, TL.W, TL.H);
   }
@@ -2451,7 +2825,7 @@
 
   function clipLabel(c) {
     return c.kind === "text" ? (c.style.text.split("\n")[0] || "text")
-      : c.kind === "color" ? "color" : c.name || c.kind;
+      : c.kind === "color" ? ((BG_INDEX[c.template] || BG_INDEX.solid).name) : c.name || c.kind;
   }
 
   // top row = layer 0 (front-most, drawn last); bottom row = background
@@ -2494,6 +2868,7 @@
     updatePlayhead();
     $("tl-del").hidden = TL.sel == null;
     $("tl-edit").hidden = TL.sel == null;
+    markFxClips();
   }
   // update selection highlight WITHOUT rebuilding the DOM, so the clip nodes
   // stay stable and native double-click (edit / apply visualizer) still fires
@@ -2549,7 +2924,7 @@
   function setAspect(w, h) {
     if (!w || !h) return;
     const r = w / h;
-    const a = r > 1.25 ? "16:9" : r < 0.8 ? "9:16" : "1:1";
+    const a = r > 1.55 ? "16:9" : r > 1.15 ? "4:3" : r > 0.87 ? "1:1" : r > 0.64 ? "3:4" : "9:16";
     setProjectAspect(a);
   }
   function tlAddImage(file) {
@@ -2642,6 +3017,8 @@
   $("cap-rec").addEventListener("click", capToggleRec);
   $("cap-flip").addEventListener("click", capFlip);
   $("cap-close").addEventListener("click", closeCapture);
+  $("bg-picker-close").addEventListener("click", closeBgPicker);
+  $("bg-picker").addEventListener("click", (ev) => { if (ev.target === $("bg-picker")) closeBgPicker(); });
 
   function tlAddAudio(file) {
     const url = URL.createObjectURL(file);
@@ -2655,8 +3032,17 @@
   function tlAddText() {
     addClipObj({ kind: "text", style: { text: "VERSIONS", size: 12, x: 0.5, y: 0.5, color: "#ffffff", align: "center", weight: "bold", family: "serif", pulse: 0 }, start: 0, dur: 3, layer: 0 });
   }
+  const BG_DEFAULT_COLORS = {
+    solid: ["#8f78ff", "#8f78ff"], flow: ["#8f78ff", "#ff7854"], plasma: ["#1a0b2e", "#ff2e88"],
+    ferro: ["#d23b18", "#2a0d06"], dots: ["#d8202a", "#3a0a0e"], space: ["#d8b45a", "#141005"],
+    clouds: ["#6f9fd8", "#ffffff"], geo: ["#d8202a", "#ffffff"], burst: ["#ff3b1c", "#200803"],
+  };
   function tlAddColor() {
-    addClipObj({ kind: "color", color: "#8f78ff", start: 0, dur: 3, layer: 2 });
+    openBgPicker((tplId) => {
+      const [c1, c2] = BG_DEFAULT_COLORS[tplId] || BG_DEFAULT_COLORS.solid;
+      addClipObj({ kind: "color", template: tplId, color: c1, color2: c2,
+        speed: 1, beat: 0.4, start: 0, dur: Math.min(5, remainingFrom(TL.playhead)), layer: TL.layers - 1 });
+    });
   }
 
   function deleteSelectedClip() {
@@ -2664,6 +3050,10 @@
     const c = TL.clips.find((x) => x.id === TL.sel);
     if (c && c.el && c.el.pause) c.el.pause();
     TL.clips = TL.clips.filter((x) => x.id !== TL.sel);
+    if (fxClip && c && fxClip.id === c.id) {
+      fxClip = null;
+      if (nodeVisible()) setStudioMode("editor");
+    }
     TL.sel = null;
     renderTimeline(); renderComposite();
     if (nodeVisible()) renderNodeGraph();
@@ -2760,12 +3150,19 @@
     if (c) openClipParams(c);
   });
 
-  // ---- selected clip → open its params (text/color) in the node modal ----
+  // ---- double-click a clip: media opens ITS node view; text/audio open
+  // their settings (armed visualizer still wins on media) ----
+  function openClipFx(c) {
+    ensureClipFx(c);
+    fxClip = c;
+    setStudioMode("docked");
+  }
   tlTracksEl().addEventListener("dblclick", (ev) => {
     const c = tlClipFromEvent(ev); if (!c) return;
     if (visualizerArmed && (c.kind === "image" || c.kind === "video")) {
       applyVisualizerTo(c); setVisualizerArmed(false); return;
     }
+    if (c.kind === "image" || c.kind === "video" || c.kind === "color") { openClipFx(c); return; }
     openClipParams(c);
   });
 
@@ -2801,8 +3198,22 @@
       add({ key: "volume", label: "loudness", min: 0, max: 2, step: 0.02 },
           () => c.volume != null ? c.volume : 1, (v) => setClipVolume(c, v));
     } else if (c.kind === "color") {
+      add({ key: "template", label: "template", type: "select",
+            options: BG_TEMPLATES.map((t) => [t.id, t.name]) },
+          () => c.template || "solid", (v) => {
+            c.template = v;
+            const [c1, c2] = BG_DEFAULT_COLORS[v] || BG_DEFAULT_COLORS.solid;
+            if (!c._touchedColor) { c.color = c1; c.color2 = c2; }
+            renderTimeline(); renderComposite();
+          });
       add({ key: "color", label: "color", type: "color" },
-        () => c.color, (v) => { c.color = v; renderTimeline(); renderComposite(); });
+        () => c.color || "#8f78ff", (v) => { c.color = v; c._touchedColor = true; renderTimeline(); renderComposite(); });
+      add({ key: "color2", label: "accent", type: "color" },
+        () => c.color2 || "#ff7854", (v) => { c.color2 = v; c._touchedColor = true; renderComposite(); });
+      add({ key: "speed", label: "speed", min: 0, max: 3, step: 0.05 },
+        () => c.speed == null ? 1 : c.speed, (v) => { c.speed = v; renderComposite(); });
+      add({ key: "beat", label: "beat react", min: 0, max: 1, step: 0.05 },
+        () => c.beat == null ? 0.4 : c.beat, (v) => { c.beat = v; renderComposite(); });
       add({ key: "opacity", label: "opacity", min: 0, max: 1, step: 0.02 },
           () => c.opacity != null ? c.opacity : 1, (v) => { c.opacity = v; renderComposite(); });
     } else {
@@ -2956,7 +3367,16 @@
   })();
 
   function enterEditor() { setStudioMode("editor"); }
-  function editorToEffects() { setStudioMode("docked"); }
+  function editorToEffects() {
+    // the effects panel edits one clip: the selected one if it can take fx,
+    // else the first media/background clip on the timeline
+    const eligible = (c) => c && (c.kind === "image" || c.kind === "video" || c.kind === "color");
+    const sel = TL.clips.find((x) => x.id === TL.sel);
+    fxClip = eligible(sel) ? sel : TL.clips.find(eligible) || null;
+    if (fxClip) ensureClipFx(fxClip);
+    setStudioMode("docked");
+    if (!fxClip) toast("add a photo, video or background first — effects apply per clip", 3600);
+  }
   async function tlExport(targetW, targetH) {
     if (!TL.clips.length || TL._exporting) return;
     TL._exporting = true;

@@ -118,6 +118,8 @@
             <option value="16:9">16:9 landscape</option>
             <option value="9:16">9:16 vertical</option>
             <option value="1:1">1:1 square</option>
+            <option value="4:3">4:3 classic</option>
+            <option value="3:4">3:4 portrait</option>
           </select>
           <div class="tl-add-wrap">
             <button id="tl-export" class="nbtn nbtn-primary" type="button">export</button>
@@ -131,7 +133,7 @@
               <button type="button" data-add="audio">audio track</button>
               <button type="button" data-add="camera">camera · photo / record</button>
               <button type="button" data-add="text">text</button>
-              <button type="button" data-add="color">color card</button>
+              <button type="button" data-add="color">background</button>
             </div>
           </div>
         </div>
@@ -184,6 +186,16 @@
       <button id="cap-flip" class="nbtn" type="button">flip</button>
       <button id="cap-close" class="nbtn" type="button">close</button>
     </div>
+  </div>
+</div>
+
+<div id="bg-picker" class="bg-picker" hidden>
+  <div class="bg-picker-inner">
+    <div class="bg-picker-head">
+      <span class="bg-picker-title">backgrounds</span>
+      <button id="bg-picker-close" class="node-x" type="button" aria-label="close">×</button>
+    </div>
+    <div id="bg-picker-grid" class="bg-picker-grid"></div>
   </div>
 </div>
 
