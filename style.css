@@ -897,3 +897,84 @@ body.node-mode #node-view { display: block; }
 @keyframes rotate-spin { 0%,60%{ transform: rotate(0); } 80%{ transform: rotate(-90deg); } 100%{ transform: rotate(-90deg); } }
 #rotate-hint p { font-weight: 600; letter-spacing: .02em; text-transform: lowercase; }
 #rotate-hint span { color: var(--muted); font-size: .8rem; text-transform: lowercase; }
+
+/* ---- editor view (Final Cut-style): preview + magnetic timeline ---- */
+#editor-view { display: none; }
+body.editor-mode #editor-view {
+  display: flex; flex-direction: column;
+  height: calc(100dvh - 52px);
+  background: #0e0e0c;
+  background-image: radial-gradient(#1a1a17 1px, transparent 1.2px);
+  background-size: 26px 26px;
+}
+body.editor-mode .canvas-panel, body.editor-mode .controls,
+body.editor-mode #chip-bar, body.editor-mode #app-bar,
+body.editor-mode #chip-sheet, body.editor-mode .site-footer { display: none !important; }
+body.editor-mode .workspace { display: block; }
+
+.ev-top { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.ev-preview { display: flex; align-items: center; justify-content: center; max-width: 100%; max-height: 100%; }
+.ev-preview canvas {
+  max-width: 100%; max-height: calc(100dvh - 52px - 200px);
+  image-rendering: pixelated; border-radius: 4px;
+  border: 1px solid var(--hairline);
+}
+.ev-effects-btn { position: absolute; top: 16px; right: 20px; z-index: 4; }
+.ev-empty {
+  color: var(--muted); text-align: center; text-transform: lowercase;
+  letter-spacing: .02em; font-size: .95rem; line-height: 1.8;
+}
+.ev-empty b { color: var(--ink); font-weight: 600; }
+
+/* timeline */
+.timeline {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--ink);
+  background: #131311;
+  user-select: none;
+}
+.tl-bar { display: flex; align-items: center; gap: .8rem; padding: .5rem .8rem; border-bottom: 1px solid #242420; }
+.tl-time { font: 600 .74rem/1 ui-monospace, Menlo, monospace; color: var(--lavender); }
+.tl-hint { font-size: .68rem; color: var(--muted); text-transform: lowercase; }
+.tl-spacer { flex: 1; }
+.tl-add-wrap { position: relative; }
+#tl-add-menu { position: absolute; right: 0; bottom: calc(100% + 6px); min-width: 150px; }
+
+.tl-scroll { position: relative; padding: 0 0 .5rem; }
+.tl-ruler { height: 18px; position: relative; margin: 0 8px; border-bottom: 1px solid #242420; }
+.tl-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid #2c2c28; padding-left: 3px; font: 500 .58rem/18px ui-monospace, monospace; color: var(--muted); }
+.tl-tracks { padding: 6px 8px; display: flex; flex-direction: column; gap: 5px; }
+.tl-track {
+  position: relative; height: 40px;
+  background: #191917; border: 1px solid #242420; border-radius: 5px;
+  overflow: hidden;
+}
+.tl-track-tag { position: absolute; left: 6px; top: 4px; font: 600 .56rem/1 ui-monospace, monospace; color: #4a4a44; z-index: 0; pointer-events: none; }
+.tl-clip {
+  position: absolute; top: 3px; bottom: 3px; left: 0;
+  border-radius: 4px; overflow: hidden; cursor: grab;
+  border: 1px solid rgba(255,255,255,.18);
+  display: flex; align-items: center;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.2);
+}
+.tl-clip.sel { outline: 2px solid var(--lavender); outline-offset: -1px; z-index: 3; }
+.tl-clip:active { cursor: grabbing; }
+.tl-clip-label {
+  font: 600 .62rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #fff; padding: 0 .5em; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; text-transform: lowercase; text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  pointer-events: none; flex: 1;
+}
+.tl-clip-thumb { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: .55; }
+.tl-clip-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 2; }
+.tl-clip-handle.l { left: 0; } .tl-clip-handle.r { right: 0; }
+.tl-clip-c-image { background: #2b3a67; }
+.tl-clip-c-video { background: #2f5d4a; }
+.tl-clip-c-text  { background: #6a4fb0; }
+.tl-clip-c-color { background: #7a6a2a; }
+.tl-clip-c-audio { background: #7a3a5a; }
+.tl-playhead { position: absolute; top: 18px; bottom: 0; width: 2px; background: var(--lavender); z-index: 5; pointer-events: none; box-shadow: 0 0 6px var(--lavender); }
+.tl-playhead::before { content: ""; position: absolute; top: -18px; left: -5px; border: 6px solid transparent; border-top-color: var(--lavender); }
+.tl-snapline { position: absolute; top: 18px; bottom: 0; width: 1px; background: #ffd75e; z-index: 6; pointer-events: none; }
+
+body.editor-mode #to-editor { display: none; }

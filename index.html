@@ -17,7 +17,6 @@
 <body>
 <header class="site-header">
   <div class="wordmark">versions<span class="eye">◉</span>eye</div>
-  <button id="header-cta" class="btn btn-cta header-cta" type="button">start a project</button>
 </header>
 
 <main>
@@ -100,9 +99,46 @@
       </div>
     </aside>
 
+    <section id="editor-view">
+      <div class="ev-top">
+        <div id="ev-preview" class="ev-preview"></div>
+        <button id="to-effects" class="nbtn ev-effects-btn" type="button">⚙ effects</button>
+      </div>
+      <div id="timeline" class="timeline">
+        <div class="tl-bar">
+          <button id="tl-play" class="nbtn" type="button">▶ play</button>
+          <span id="tl-time" class="tl-time">0.0 / 0.0s</span>
+          <span class="tl-hint">3 layers · magnetic · max 15s</span>
+          <span class="tl-spacer"></span>
+          <button id="tl-del" class="nbtn" type="button" hidden>delete clip</button>
+          <button id="tl-export" class="nbtn nbtn-primary" type="button">export</button>
+          <div class="tl-add-wrap">
+            <button id="tl-add" class="nbtn nbtn-primary" type="button">+ media</button>
+            <div id="tl-add-menu" class="node-add-menu" hidden>
+              <button type="button" data-add="image">image / photo</button>
+              <button type="button" data-add="video">video clip</button>
+              <button type="button" data-add="audio">audio track</button>
+              <button type="button" data-add="text">text</button>
+              <button type="button" data-add="color">color card</button>
+            </div>
+          </div>
+        </div>
+        <div id="tl-scroll" class="tl-scroll">
+          <div id="tl-ruler" class="tl-ruler"></div>
+          <div id="tl-tracks" class="tl-tracks">
+            <div class="tl-track" data-layer="0"><span class="tl-track-tag">L3</span></div>
+            <div class="tl-track" data-layer="1"><span class="tl-track-tag">L2</span></div>
+            <div class="tl-track" data-layer="2"><span class="tl-track-tag">L1</span></div>
+          </div>
+          <div id="tl-playhead" class="tl-playhead"></div>
+        </div>
+      </div>
+    </section>
+
     <section id="node-view" hidden>
       <svg id="node-wires" aria-hidden="true"></svg>
       <div id="node-graph"></div>
+      <button id="to-editor" class="nbtn node-exit" type="button">▤ editor</button>
       <div id="node-add-menu" class="node-add-menu" hidden></div>
       <div id="node-backdrop" hidden></div>
       <div id="node-params" class="node-card node-modal" hidden>
