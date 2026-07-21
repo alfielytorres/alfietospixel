@@ -990,3 +990,6 @@ body.editor-mode #to-editor { display: none; }
 #capture-video.mirror { transform: scaleX(-1); }
 .capture-bar { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
 .cap-rec-on { background: #c0271f !important; border-color: #c0271f !important; color: #fff !important; }
+
+.tl-aspect { font: 500 .72rem/1 "Helvetica Neue", Helvetica, Arial, sans-serif; background: #1d1d1a; color: var(--ink); border: 1px solid #2c2c28; border-radius: 6px; padding: .5em .5em; text-transform: lowercase; }
+#tl-export-menu { right: 0; bottom: calc(100% + 6px); min-width: 210px; }

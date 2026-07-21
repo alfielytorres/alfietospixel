@@ -2167,8 +2167,21 @@
 
   const TL = {
     clips: [], duration: 15, playhead: 0, playing: false,
-    raf: 0, lastPerf: 0, W: 960, H: 540, sel: null, nextId: 1,
+    raf: 0, lastPerf: 0, W: 960, H: 540, sel: null, nextId: 1, aspect: "16:9",
   };
+  const ASPECT_WH = { "16:9": [960, 540], "9:16": [540, 960], "1:1": [720, 720] };
+  const EXPORT_SIZES = {
+    "16:9": [["4K UHD · 3840×2160", 3840, 2160], ["1080p · 1920×1080", 1920, 1080], ["720p · 1280×720", 1280, 720]],
+    "9:16": [["1080×1920 · reels / tiktok / shorts", 1080, 1920], ["720×1280", 720, 1280]],
+    "1:1":  [["1080×1080 · square", 1080, 1080], ["720×720", 720, 720]],
+  };
+  function setProjectAspect(a, keepMediaFit) {
+    TL.aspect = a;
+    const [w, h] = ASPECT_WH[a] || ASPECT_WH["16:9"];
+    TL.W = w; TL.H = h; tlCanvas.width = w; tlCanvas.height = h;
+    const sel = $("tl-aspect"); if (sel) sel.value = a;
+    renderComposite();
+  }
   const tlCanvas = document.createElement("canvas");
   const tlCtx = tlCanvas.getContext("2d", { willReadFrequently: true });
   const SNAP_PX = 7;
@@ -2409,9 +2422,9 @@
   function hasVisual() { return TL.clips.some((c) => c.kind === "image" || c.kind === "video"); }
   function setAspect(w, h) {
     if (!w || !h) return;
-    TL.W = w >= h ? Math.min(1280, w) : Math.round(720 * w / h);
-    TL.H = Math.round(TL.W * h / w);
-    tlCanvas.width = TL.W; tlCanvas.height = TL.H;
+    const r = w / h;
+    const a = r > 1.25 ? "16:9" : r < 0.8 ? "9:16" : "1:1";
+    setProjectAspect(a);
   }
   function tlAddImage(file) {
     const url = URL.createObjectURL(file);
@@ -2705,12 +2718,17 @@
     document.body.classList.remove("editor-mode");
     enterNodeView();
   }
-  async function tlExport() {
+  async function tlExport(targetW, targetH) {
     if (!TL.clips.length || TL._exporting) return;
     TL._exporting = true;
     const btn = $("tl-export"); btn.disabled = true; btn.textContent = "exporting…";
     tlPause(); TL.playhead = 0; syncMedia(true); renderComposite();
-    const vstream = canvas.captureStream(EXPORT_FPS);
+    const ecan = document.createElement("canvas");
+    ecan.width = targetW || TL.W; ecan.height = targetH || TL.H;
+    const ectx = ecan.getContext("2d"); ectx.imageSmoothingEnabled = false;
+    const blit = () => ectx.drawImage(canvas, 0, 0, ecan.width, ecan.height);
+    blit();
+    const vstream = ecan.captureStream(EXPORT_FPS);
     ensureMix();
     const tracks = [...vstream.getVideoTracks(), ...(mixDest ? mixDest.stream.getAudioTracks() : [])];
     const stream = new MediaStream(tracks);
@@ -2732,7 +2750,7 @@
       (function step() {
         const now = performance.now();
         TL.playhead += (now - TL.lastPerf) / 1000; TL.lastPerf = now;
-        syncMedia(false); renderComposite(); updatePlayhead();
+        syncMedia(false); renderComposite(); ectx.drawImage(canvas, 0, 0, ecan.width, ecan.height); updatePlayhead();
         btn.textContent = `exporting ${Math.min(100, Math.round(TL.playhead / end * 100))}%`;
         if (TL.playhead >= end) { res(); return; }
         requestAnimationFrame(step);
@@ -2762,7 +2780,20 @@
       : "visualizer on — add an audio track, then play to make it react", 4600);
   }
   $("tl-visualizer").addEventListener("click", applyVisualizer);
-  $("tl-export").addEventListener("click", tlExport);
+  $("tl-aspect").addEventListener("change", (e) => setProjectAspect(e.target.value));
+  $("tl-export").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const menu = $("tl-export-menu");
+    if (!menu.hidden) { menu.hidden = true; return; }
+    menu.innerHTML = "";
+    for (const [label, w, h] of EXPORT_SIZES[TL.aspect]) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+      b.addEventListener("click", () => { menu.hidden = true; tlExport(w, h); });
+      menu.appendChild(b);
+    }
+    menu.hidden = false;
+  });
+  document.addEventListener("click", (ev) => { if (!ev.target.closest(".tl-add-wrap")) $("tl-export-menu").hidden = true; });
 
   $("to-effects").addEventListener("click", editorToEffects);
   $("to-editor").addEventListener("click", enterEditor);

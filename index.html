@@ -113,7 +113,15 @@
           <span class="tl-spacer"></span>
           <button id="tl-edit" class="nbtn" type="button" hidden>edit clip</button>
           <button id="tl-del" class="nbtn" type="button" hidden>delete clip</button>
-          <button id="tl-export" class="nbtn nbtn-primary" type="button">export</button>
+          <select id="tl-aspect" class="tl-aspect" title="aspect ratio">
+            <option value="16:9">16:9 landscape</option>
+            <option value="9:16">9:16 vertical</option>
+            <option value="1:1">1:1 square</option>
+          </select>
+          <div class="tl-add-wrap">
+            <button id="tl-export" class="nbtn nbtn-primary" type="button">export</button>
+            <div id="tl-export-menu" class="node-add-menu" hidden></div>
+          </div>
           <div class="tl-add-wrap">
             <button id="tl-add" class="nbtn nbtn-primary" type="button">+ media</button>
             <div id="tl-add-menu" class="node-add-menu" hidden>
