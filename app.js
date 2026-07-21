@@ -2203,10 +2203,24 @@
     if (!ensureMix()) return;
     try {
       c._src = mixCtx.createMediaElementSource(c.el);
-      c._src.connect(mixCtx.destination); // speakers
-      c._src.connect(mixDest);            // export tap
-      c._src.connect(mixAnalyser);        // beat detection
+      c._gain = mixCtx.createGain();
+      c._gain.gain.value = c.volume != null ? c.volume : 1;
+      c._src.connect(c._gain);
+      c._gain.connect(mixCtx.destination); // speakers
+      c._gain.connect(mixDest);            // export tap
+      c._gain.connect(mixAnalyser);        // beat detection
     } catch { c._src = null; }
+  }
+  function setClipVolume(c, v) {
+    c.volume = v;
+    if (c._gain) c._gain.gain.value = v;
+    else if (c.el) { try { c.el.volume = Math.max(0, Math.min(1, v)); } catch {} }
+  }
+  // (re)connect any audio/video clips whose graph didn't build yet (e.g. the
+  // AudioContext needed a user gesture) — called on play so sound is audible.
+  function ensureClipAudio() {
+    if (!ensureMix()) return;
+    for (const c of TL.clips) if ((c.kind === "audio" || c.kind === "video") && !c._src) connectClipAudio(c);
   }
   function updateBeat() {
     if (!mixAnalyser || !mixData) return;
@@ -2245,6 +2259,8 @@
 
   function drawTLClip(ctx, c, t) {
     const lt = t - c.start;
+    const a = c.opacity != null ? c.opacity : 1;
+    ctx.globalAlpha = a;
     if (c.kind === "image") { drawVisual(ctx, c.el, c.natW, c.natH, c); }
     else if (c.kind === "video") {
       try { drawVisual(ctx, c.el, c.el.videoWidth, c.el.videoHeight, c); } catch { /* not ready */ }
@@ -2262,6 +2278,7 @@
       for (const ln of lines) { ctx.fillText(ln, cx, y); y += lh; }
       ctx.shadowBlur = 0;
     }
+    ctx.globalAlpha = 1;
   }
 
   function compositeFrame(t) {
@@ -2269,9 +2286,32 @@
     tlCtx.fillStyle = "#000"; tlCtx.fillRect(0, 0, TL.W, TL.H);
     for (let layer = 2; layer >= 0; layer--) {
       const c = clipAt(layer, t);
-      if (c) drawTLClip(tlCtx, c, t);
+      if (c && c.kind !== "text") drawTLClip(tlCtx, c, t);
     }
     return tlCtx.getImageData(0, 0, TL.W, TL.H);
+  }
+
+  // text clips are drawn ON TOP of the effect output so titles/lyrics stay
+  // crisp and legible over the glitch (not dithered away)
+  function drawTextClipOnCtx(g, c) {
+    const s = c.style; const W = canvas.width, H = canvas.height;
+    const pulse = 1 + audioLevel * (s.pulse || 0) * 0.6;
+    g.save();
+    g.globalAlpha = c.opacity != null ? c.opacity : 1;
+    g.font = `${s.weight} ${(s.size / 100) * H * pulse}px ${s.family}`;
+    g.fillStyle = s.color; g.textAlign = s.align; g.textBaseline = "middle";
+    g.shadowColor = "rgba(0,0,0,.6)"; g.shadowBlur = (s.size / 100) * H * 0.1;
+    const cx = s.align === "left" ? W * 0.06 : s.align === "right" ? W * 0.94 : W * s.x;
+    const lines = String(s.text).split("\n"); const lh = (s.size / 100) * H * 1.15 * pulse;
+    let y = H * s.y - (lines.length - 1) * lh / 2;
+    for (const ln of lines) { g.fillText(ln, cx, y); y += lh; }
+    g.restore();
+  }
+  function drawTextClipsTop(t) {
+    for (let layer = 2; layer >= 0; layer--) {
+      const c = clipAt(layer, t);
+      if (c && c.kind === "text") drawTextClipOnCtx(ctx, c);
+    }
   }
 
   function renderComposite() {
@@ -2282,7 +2322,16 @@
     if (canvas.width !== out.width) canvas.width = out.width;
     if (canvas.height !== out.height) canvas.height = out.height;
     ctx.putImageData(out, 0, 0);
+    drawTextClipsTop(TL.playhead);
     scheduleThumbs();
+  }
+
+  // coalesce rapid interactive re-renders (drags/wheels) to one per frame
+  let _renderQueued = false;
+  function queueRender() {
+    if (_renderQueued) return;
+    _renderQueued = true;
+    requestAnimationFrame(() => { _renderQueued = false; renderComposite(); });
   }
 
   function drawEmptyPreview() {
@@ -2309,18 +2358,25 @@
     }
   }
 
+  let lastRenderPerf = 0;
   function tlLoop() {
     const now = performance.now();
     TL.playhead += (now - TL.lastPerf) / 1000;
     TL.lastPerf = now;
     if (TL.playhead >= projectEnd()) { TL.playhead = 0; }
     syncMedia(false);
-    renderComposite();
+    // the JS effect pipeline is the costly step — cap it to EXPORT_FPS so
+    // playback stays smooth instead of hammering the CPU every rAF
+    if (now - lastRenderPerf >= 1000 / EXPORT_FPS - 1.5) {
+      renderComposite();
+      lastRenderPerf = now;
+    }
     updatePlayhead();
     if (TL.playing) TL.raf = requestAnimationFrame(tlLoop);
   }
   function tlPlay() {
     if (TL.playing || !TL.clips.length) return;
+    ensureClipAudio(); // resume the AudioContext on the play gesture
     if (TL.playhead >= projectEnd() - 0.02) TL.playhead = 0;
     TL.playing = true; TL.lastPerf = performance.now();
     $("tl-play").innerHTML = '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><rect x="2" y="1.5" width="3" height="9" fill="currentColor"/><rect x="7" y="1.5" width="3" height="9" fill="currentColor"/></svg><span>pause</span>';
@@ -2649,12 +2705,23 @@
           () => c.ox || 0, (v) => { c.ox = v; renderComposite(); });
       add({ key: "oy", label: "move y", min: -1, max: 1, step: 0.01 },
           () => c.oy || 0, (v) => { c.oy = v; renderComposite(); });
+      add({ key: "opacity", label: "opacity", min: 0, max: 1, step: 0.02 },
+          () => c.opacity != null ? c.opacity : 1, (v) => { c.opacity = v; renderComposite(); });
+      if (c.kind === "video") {
+        add({ key: "volume", label: "loudness", min: 0, max: 2, step: 0.02 },
+            () => c.volume != null ? c.volume : 1, (v) => setClipVolume(c, v));
+      }
       const tip = document.createElement("p"); tip.className = "hint";
       tip.style.marginTop = ".6rem"; tip.textContent = "tip: drag the image in the preview to move it";
       body.appendChild(tip);
+    } else if (c.kind === "audio") {
+      add({ key: "volume", label: "loudness", min: 0, max: 2, step: 0.02 },
+          () => c.volume != null ? c.volume : 1, (v) => setClipVolume(c, v));
     } else if (c.kind === "color") {
       add({ key: "color", label: "color", type: "color" },
         () => c.color, (v) => { c.color = v; renderTimeline(); renderComposite(); });
+      add({ key: "opacity", label: "opacity", min: 0, max: 1, step: 0.02 },
+          () => c.opacity != null ? c.opacity : 1, (v) => { c.opacity = v; renderComposite(); });
     } else {
       const P = [
         { key: "text", label: "text", type: "text" },
@@ -2668,6 +2735,11 @@
         { key: "pulse", label: "beat pulse", min: 0, max: 1, step: 0.05 },
       ];
       for (const p of P) body.appendChild(buildParamRow(p, () => c.style[p.key], (v) => { c.style[p.key] = v; renderTimeline(); renderComposite(); }));
+      body.appendChild(buildParamRow({ key: "opacity", label: "opacity", min: 0, max: 1, step: 0.02 },
+        () => c.opacity != null ? c.opacity : 1, (v) => { c.opacity = v; renderComposite(); }));
+      const tip = document.createElement("p"); tip.className = "hint";
+      tip.style.marginTop = ".6rem"; tip.textContent = "tip: drag the text in the preview to move it · double-tap it to edit";
+      body.appendChild(tip);
     }
     $("node-backdrop").hidden = false; $("node-params").hidden = false;
     nodeParamsStash = null;
@@ -2681,28 +2753,122 @@
     }
     return null;
   }
+  function activeTextClip() {
+    for (let L = 0; L < 3; L++) {
+      const c = clipAt(L, TL.playhead);
+      if (c && c.kind === "text") return c;
+    }
+    return null;
+  }
+  // pointer position → canvas pixel coords (the element box matches the
+  // intrinsic aspect, so no letterboxing to account for)
+  function evToCanvas(ev) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (ev.clientX - r.left) / r.width * canvas.width,
+      y: (ev.clientY - r.top) / r.height * canvas.height,
+      r,
+    };
+  }
+  // bounding box (canvas px) of a rendered text clip, for hit-testing
+  function textBoxCanvas(c) {
+    const s = c.style; const W = canvas.width, H = canvas.height;
+    const pulse = 1 + audioLevel * (s.pulse || 0) * 0.6;
+    ctx.save();
+    ctx.font = `${s.weight} ${(s.size / 100) * H * pulse}px ${s.family}`;
+    const lines = String(s.text).split("\n");
+    let maxw = 0; for (const ln of lines) { const m = ctx.measureText(ln || " "); if (m.width > maxw) maxw = m.width; }
+    ctx.restore();
+    const lh = (s.size / 100) * H * 1.15 * pulse;
+    const totalH = lines.length * lh;
+    const cx = s.align === "left" ? W * 0.06 : s.align === "right" ? W * 0.94 : W * s.x;
+    const cy = H * s.y;
+    let x0, x1;
+    if (s.align === "left") { x0 = cx; x1 = cx + maxw; }
+    else if (s.align === "right") { x0 = cx - maxw; x1 = cx; }
+    else { x0 = cx - maxw / 2; x1 = cx + maxw / 2; }
+    const pad = Math.max(14, totalH * 0.25);
+    return { x0: x0 - pad, x1: x1 + pad, y0: cy - totalH / 2 - pad, y1: cy + totalH / 2 + pad };
+  }
+  function inBox(p, b) { return p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1; }
+
+  // ---- inline lyric/text editing right on the preview ----
+  let inlineEditor = null;
+  function closeInlineTextEditor() {
+    if (!inlineEditor) return;
+    inlineEditor.ta.remove(); inlineEditor = null;
+  }
+  function openInlineTextEditor(c) {
+    closeInlineTextEditor();
+    const host = $("ev-top");
+    const ta = document.createElement("textarea");
+    ta.className = "preview-text-edit";
+    ta.value = c.style.text;
+    ta.spellcheck = false;
+    host.appendChild(ta);
+    const place = () => {
+      const b = textBoxCanvas(c);
+      const cr = canvas.getBoundingClientRect(), hr = host.getBoundingClientRect();
+      const scale = cr.width / canvas.width;
+      ta.style.left = (cr.left - hr.left + b.x0 * scale) + "px";
+      ta.style.top = (cr.top - hr.top + b.y0 * scale) + "px";
+      ta.style.width = Math.max(140, (b.x1 - b.x0) * scale) + "px";
+    };
+    place();
+    ta.focus(); ta.select();
+    ta.addEventListener("input", () => { c.style.text = ta.value; renderComposite(); place(); });
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+      if (e.key === "Escape") { e.preventDefault(); ta.blur(); }
+    });
+    ta.addEventListener("blur", () => { c.style.text = ta.value; renderTimeline(); renderComposite(); closeInlineTextEditor(); });
+    inlineEditor = { ta, clip: c };
+  }
+
   (function previewDrag() {
-    let dragging = null, sx = 0, sy = 0, ox0 = 0, oy0 = 0;
+    let dragging = null, kind = null, sx = 0, sy = 0, ox0 = 0, oy0 = 0, tx0 = 0, ty0 = 0;
     canvas.addEventListener("pointerdown", (ev) => {
       if (!document.body.classList.contains("editor-mode")) return;
+      closeInlineTextEditor();
+      const p = evToCanvas(ev);
+      const tc = activeTextClip();
+      if (tc && inBox(p, textBoxCanvas(tc))) {
+        dragging = tc; kind = "text"; sx = ev.clientX; sy = ev.clientY;
+        const b = textBoxCanvas(tc);
+        tx0 = tc.style.align === "center" ? (tc.style.x != null ? tc.style.x : 0.5) : ((b.x0 + b.x1) / 2) / canvas.width;
+        ty0 = tc.style.y != null ? tc.style.y : 0.5;
+        canvas.setPointerCapture(ev.pointerId); ev.preventDefault(); return;
+      }
       const c = activeVisualClip(); if (!c) return;
-      dragging = c; sx = ev.clientX; sy = ev.clientY; ox0 = c.ox || 0; oy0 = c.oy || 0;
+      dragging = c; kind = "visual"; sx = ev.clientX; sy = ev.clientY; ox0 = c.ox || 0; oy0 = c.oy || 0;
       canvas.setPointerCapture(ev.pointerId); ev.preventDefault();
     });
     canvas.addEventListener("pointermove", (ev) => {
       if (!dragging) return;
       const r = canvas.getBoundingClientRect();
-      dragging.ox = ox0 + (ev.clientX - sx) / r.width;
-      dragging.oy = oy0 + (ev.clientY - sy) / r.height;
-      renderComposite();
+      if (kind === "text") {
+        const s = dragging.style;
+        s.align = "center"; // dragging implies free positioning
+        s.x = Math.max(0, Math.min(1, tx0 + (ev.clientX - sx) / r.width));
+        s.y = Math.max(0, Math.min(1, ty0 + (ev.clientY - sy) / r.height));
+      } else {
+        dragging.ox = ox0 + (ev.clientX - sx) / r.width;
+        dragging.oy = oy0 + (ev.clientY - sy) / r.height;
+      }
+      queueRender();
     });
-    for (const n of ["pointerup", "pointercancel"]) canvas.addEventListener(n, () => { dragging = null; });
+    for (const n of ["pointerup", "pointercancel"]) canvas.addEventListener(n, () => { dragging = null; kind = null; });
+    canvas.addEventListener("dblclick", (ev) => {
+      if (!document.body.classList.contains("editor-mode")) return;
+      const tc = activeTextClip(); if (!tc) return;
+      if (inBox(evToCanvas(ev), textBoxCanvas(tc))) { ev.preventDefault(); openInlineTextEditor(tc); }
+    });
     canvas.addEventListener("wheel", (ev) => {
       if (!document.body.classList.contains("editor-mode")) return;
       const c = activeVisualClip(); if (!c) return;
       ev.preventDefault();
       c.scale = Math.max(0.2, Math.min(4, (c.scale || 1) * (ev.deltaY < 0 ? 1.06 : 0.94)));
-      renderComposite();
+      queueRender();
     }, { passive: false });
   })();
 
